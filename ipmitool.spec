@@ -1,7 +1,7 @@
 Name:         ipmitool
 Summary:      Utility for IPMI control
 Version:      1.8.11
-Release:      21%{?dist}
+Release:      28%{?dist}
 License:      BSD
 Group:        System Environment/Base
 URL:          http://ipmitool.sourceforge.net/
@@ -43,6 +43,9 @@ Patch21: ipmitool-1.8.14-dell13g.patch
 Patch22: ipmitool-1.8.14-unienv.patch
 Patch23: ipmitool-1.8.14-optenvre.patch
 Patch24: ipmitool-1.8.13-envarg.patch
+Patch25: ipmitool-1.8.15-bz1194420-ddr4.patch
+Patch26: ipmitool-1.8.11-bz1126333-slowswid.patch
+Patch27: ipmitool-1.8.11-bz878614-overname.patch
 
 %description
 This package contains a utility for interfacing with devices that support
@@ -86,6 +89,10 @@ setting LAN configuration, and chassis power control.
 %patch22 -p0 -b .unienv
 %patch23 -p1 -b .optenvre
 %patch24 -p1 -b .envarg
+%patch25 -p1 -b .ddr4
+%patch26 -p1 -b .slowswid
+%patch27 -p1 -b .overname
+
 
 for f in AUTHORS ChangeLog; do
     iconv -f iso-8859-1 -t utf8 < ${f} > ${f}.utf8
@@ -110,10 +117,10 @@ install -Dpm 755 contrib/ipmievd.init.redhat %{buildroot}%{_initrddir}/ipmievd
 install -Dpm 644 %SOURCE1 %{buildroot}%{_sysconfdir}/sysconfig/ipmievd
 install -Dm 644 contrib/exchange-bmc-os-info.sysconf %{buildroot}%{_sysconfdir}/sysconfig/exchange-bmc-os-info
 install -Dm 644 %SOURCE2 %{buildroot}%{_sysconfdir}/profile.d/set-bmc-url.sh
-install -Dm 755 contrib/exchange-bmc-os-info.init.redhat %{buildroot}%{_libexecdir}/exchange-bmc-os-info
+install -Dm 755 contrib/exchange-bmc-os-info.init.redhat %{buildroot}%{_initddir}/exchange-bmc-os-info
 
 install -Dm 644 contrib/bmc-snmp-proxy.sysconf %{buildroot}%{_sysconfdir}/sysconfig/bmc-snmp-proxy
-install -Dm 755 contrib/bmc-snmp-proxy         %{buildroot}%{_libexecdir}/bmc-snmp-proxy
+install -Dm 755 contrib/bmc-snmp-proxy         %{buildroot}%{_initddir}/bmc-snmp-proxy
 
 install -d -m 755 ${RPM_BUILD_ROOT}%{_sysconfdir}/modprobe.d
 install -m 644 %SOURCE3 ${RPM_BUILD_ROOT}%{_sysconfdir}/modprobe.d/ipmitool-modalias.conf
@@ -141,8 +148,8 @@ fi
 %config(noreplace) %{_sysconfdir}/sysconfig/exchange-bmc-os-info
 %config(noreplace) %{_sysconfdir}/sysconfig/bmc-snmp-proxy
 %{_sysconfdir}/profile.d/set-bmc-url.sh
-%{_libexecdir}/exchange-bmc-os-info
-%{_libexecdir}/bmc-snmp-proxy
+%{_initddir}/exchange-bmc-os-info
+%{_initddir}/bmc-snmp-proxy
 %{_initrddir}/ipmievd
 %{_bindir}/*
 %{_sbindir}/*
@@ -151,7 +158,20 @@ fi
 %{_datadir}/ipmitool
 
 %changelog
-* Mon Sep 15 2014 Ales Ledvinka <aledvink@redhat.com> - 1.8.11-20
+* Mon Apr 20 2015 Ales Ledvinka <aledvink@redhat.com> - 1.8.11-28
+- (#1085072) Correct init paths.
+
+* Wed Mar 04 2015 Ales Ledvinka <aledvink@redhat.com> - 1.8.11-25
+- (#878614)  SDR long sensor names.
+
+* Tue Feb 24 2015 Ales Ledvinka <aledvink@redhat.com> - 1.8.11-23
+- (#1194420) Fix DDR4 SDR crash.
+- (#1170266) Wrong version reported.
+- (#1162175) Extra dependency.
+- (#1126333) Very slow response from SDR owner type SW ID
+- (#903019)  SDR lists x4600m2 fan units as unspecified
+
+* Mon Sep 15 2014 Ales Ledvinka <aledvink@redhat.com> - 1.8.11-21
 - (#1028163) Fix environment variable parsing.
 
 * Mon Sep 15 2014 Ales Ledvinka <aledvink@redhat.com> - 1.8.11-20

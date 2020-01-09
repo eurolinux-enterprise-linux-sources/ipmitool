@@ -1,0 +1,12 @@
+diff -up ./lib/ipmi_sdr.c.slowswid ./lib/ipmi_sdr.c
+--- ./lib/ipmi_sdr.c.slowswid	2015-03-04 09:18:25.746937034 +0100
++++ ./lib/ipmi_sdr.c	2015-03-04 09:19:14.587847042 +0100
+@@ -572,6 +572,8 @@ ipmi_sdr_get_sensor_reading_ipmb(struct
+ 	uint32_t save_addr;
+ 	uint32_t save_channel;
+ 
++	if ((strncmp(intf->name, "ipmb", 4)) != 0)
++		return ipmi_sdr_get_sensor_reading(intf, sensor);
+ 	if ( BRIDGE_TO_SENSOR(intf, target, channel) ) {
+ 		lprintf(LOG_DEBUG,
+ 			"Bridge to Sensor "
