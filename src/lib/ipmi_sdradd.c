@@ -52,6 +52,9 @@
 
 #define ADD_PARTIAL_SDR 0x25
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct sdr_add_rq {
   uint16_t reserve_id;  /* reservation ID */
   uint16_t id;          /* record ID */
@@ -60,9 +63,16 @@ struct sdr_add_rq {
 #define PARTIAL_ADD (0)
 #define LAST_RECORD (1)
   uint8_t data[1];      /* SDR record data */
-} __attribute__ ((packed));
+} ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
-static int sdr_max_write_len = 24;
+/* This was formerly initialized to 24, reduced this to 19 so the overall
+   message fits into the recommended 32-byte limit */
+static int sdr_max_write_len = 19;
+int ipmi_parse_range_list(const char *rangeList, unsigned char *pHexList);
+int ipmi_hex_to_dec( char * rangeList, unsigned char * pDecValue);
 
 static int
 partial_send(struct ipmi_intf *intf, struct ipmi_rq *req, uint16_t *id)
@@ -93,11 +103,15 @@ ipmi_sdr_add_record(struct ipmi_intf *intf, struct sdr_record_list *sdrr)
   int rc = 0;
 
   /* actually no SDR to program */
-  if (len < 1 || !sdrr->raw)
+  if (len < 1 || !sdrr->raw) {
+    lprintf(LOG_ERR, "ipmitool: bad record , skipped");
     return 0;
+  }
 
-  if (ipmi_sdr_get_reservation(intf, 0, &reserve_id))
+  if (ipmi_sdr_get_reservation(intf, 0, &reserve_id)) {
+    lprintf(LOG_ERR, "ipmitool: reservation failed");
     return -1;
+  }
 
   sdr_rq = (struct sdr_add_rq *)malloc(sizeof(*sdr_rq) + sdr_max_write_len);
   if (sdr_rq == NULL) {
@@ -123,7 +137,9 @@ ipmi_sdr_add_record(struct ipmi_intf *intf, struct sdr_record_list *sdrr)
   req.msg.data_len = 5 + sizeof(*sdr_rq) - 1;
 
   if (partial_send(intf, &req, &id)) {
+     lprintf(LOG_ERR, "ipmitool: partial send error");
     free(sdr_rq);
+    sdr_rq = NULL;
     return -1;
   }
 
@@ -131,9 +147,8 @@ ipmi_sdr_add_record(struct ipmi_intf *intf, struct sdr_record_list *sdrr)
 
   /* sdr entry */
   while (i < len) {
-    int data_len = 0;
-
-    if (len - i < sdr_max_write_len) {
+     int data_len = 0;
+     if ( (len - i) <= sdr_max_write_len) {
       /* last crunch */
       data_len = len - i;
       sdr_rq->in_progress = LAST_RECORD;
@@ -147,12 +162,15 @@ ipmi_sdr_add_record(struct ipmi_intf *intf, struct sdr_record_list *sdrr)
     req.msg.data_len = data_len + sizeof(*sdr_rq) - 1;
 
     if ((rc = partial_send(intf, &req, &id)) != 0) {
+       lprintf(LOG_ERR, "ipmitool: partial add failed");
       break;
     }
 
     i += data_len;
   }
+
   free(sdr_rq);
+  sdr_rq = NULL;
   return rc;
 }
 
@@ -238,11 +256,13 @@ sdrr_get_records(struct ipmi_intf *intf, struct ipmi_sdr_iterator *itr,
       return -1;
     }
     memset(sdrr, 0, sizeof (struct sdr_record_list));
+   
     sdrr->id = header->id;
     sdrr->version = header->version;
     sdrr->type = header->type;
     sdrr->length = header->length;
     sdrr->raw = ipmi_sdr_get_record(intf, header, itr);
+    (void)ipmi_sdr_print_name_from_rawentry(intf,  sdrr->id, sdrr->type,sdrr->raw);
 
     /* put in the record queue */
     if (queue->head == NULL)
@@ -266,6 +286,8 @@ sdr_copy_to_sdrr(struct ipmi_intf *intf, int use_builtin,
 
   /* generate list of records for this target */
   intf->target_addr = from_addr;
+
+  /* initialize iterator */
   itr = ipmi_sdr_start(intf, use_builtin);
   if (itr == 0)
     return 0;
@@ -273,6 +295,7 @@ sdr_copy_to_sdrr(struct ipmi_intf *intf, int use_builtin,
   printf("Load SDRs from 0x%x\n", from_addr);
   rc = sdrr_get_records(intf, itr, &sdrr_queue);
   ipmi_sdr_end(intf, itr);
+  /* ... */
 
   /* write the SDRs to the destination SDR Repository */
   intf->target_addr = to_addr;
@@ -283,6 +306,7 @@ sdr_copy_to_sdrr(struct ipmi_intf *intf, int use_builtin,
       lprintf(LOG_ERR, "Cannot add SDR ID 0x%04x to repository...", sdrr->id);
     }
     free(sdrr);
+    sdrr = NULL;
   }
   return rc;
 }
@@ -304,14 +328,241 @@ ipmi_sdr_add_from_sensors(struct ipmi_intf *intf, int maxslot)
   rc = sdr_copy_to_sdrr(intf, 1, myaddr, myaddr);
 
   /* Now fill the SDRR with remote sensors */
-  for (i = 0, slave_addr = 0xB0; i < maxslot; i++, slave_addr += 2) {
-    /* Hole in the PICMG 2.9 mapping */
-    if (slave_addr == 0xC2) slave_addr += 2;
-    if(sdr_copy_to_sdrr(intf, 0, slave_addr, myaddr) < 0)
+  if( maxslot != 0 ) {
+     for (i = 0, slave_addr = 0xB0; i < maxslot; i++, slave_addr += 2) {
+        /* Hole in the PICMG 2.9 mapping */
+        if (slave_addr == 0xC2) slave_addr += 2;
+        if(sdr_copy_to_sdrr(intf, 0, slave_addr, myaddr) < 0)
+        {
+           rc = -1;
+        }
+     }
+  }
+  return rc;
+}
+
+int ipmi_hex_to_dec( char * strchar, unsigned char * pDecValue)
+{
+  int rc = -1;
+  unsigned char retValue = 0; 
+
+  if(
+     (strlen(strchar) == 4) 
+     &&
+     (strchar[0] == '0') 
+     && 
+     (strchar[1] == 'x') 
+    ) 
+  {
+      rc = 0;
+
+      if((strchar[2] >= '0') && (strchar[2] <= '9')) 
+      {
+        retValue += ((strchar[2]-'0') * 16);
+      }
+      else if((strchar[2] >= 'a') && (strchar[2] <= 'f')) 
+      {
+        retValue += (((strchar[2]-'a') + 10) * 16);
+      }
+      else if((strchar[2] >= 'A') && (strchar[2] <= 'F')) 
+      {
+        retValue += (((strchar[2]-'A') + 10) * 16);
+      }
+      else
+      {
+        rc = -1;
+      }
+
+      if((strchar[3] >= '0') && (strchar[3] <= '9')) 
+      {
+        retValue += ((strchar[3]-'0'));
+      }
+      else if((strchar[3] >= 'a') && (strchar[3] <= 'f')) 
+      {
+        retValue += (((strchar[3]-'a') + 10));
+      }
+      else if((strchar[3] >= 'A') && (strchar[3] <= 'F')) 
+      {
+        retValue += (((strchar[3]-'A') + 10));
+      }
+      else
+      {
+        rc = -1;
+      }
+  }
+
+  if(rc == 0) 
+  {
+    * pDecValue = retValue;
+  }
+  else
+  {
+    lprintf(LOG_ERR, "Must be Hex value of 4 characters (Ex.: 0x24)");
+  }
+
+  return rc;
+}
+
+
+
+#define MAX_NUM_SLOT  128
+int ipmi_parse_range_list(const char *rangeList, unsigned char * pHexList)
+{
+  int rc = -1;
+
+  unsigned char listOffset = 0;
+  char * nextString;
+  char * rangeString;
+  char * inProcessString = (char *) rangeList;
+
+  /* Discard empty string */
+  if(strlen(rangeList) == 0) 
+  {
+    return rc;
+  }
+
+  /* First, cut to comma separated string */
+  nextString = strstr( rangeList, "," );
+
+  if(nextString != rangeList) 
+  {
+    unsigned char isLast;
+    /* We get a valid string so far */
+    rc = 0;
+
+    do
     {
-      rc = -1;
+      if(nextString != NULL) 
+      {
+        (*nextString)= 0;
+        nextString   ++;
+        isLast = 0;
+      }
+      else
+      {
+        isLast = 1;
+      }
+
+      /* At this point, it is a single entry or a range */
+      rangeString = strstr( inProcessString, "-" );
+      if(rangeString == NULL) 
+      {
+        unsigned char decValue = 0;
+
+        /* Single entry */
+        rc = ipmi_hex_to_dec( inProcessString, &decValue); 
+        
+        if(rc == 0)
+        {  
+          if((decValue % 2) == 0)
+          {
+            pHexList[listOffset++] = decValue;
+          }
+          else
+          {
+            lprintf(LOG_ERR, "I2C address provided value must be even.");
+          }
+        }
+      }
+      else
+      {
+        unsigned char startValue = 0;
+        unsigned char endValue = 0;
+
+
+        (*rangeString)= 0; /* Cut string*/
+        rangeString ++;
+
+        /* Range */
+        rc = ipmi_hex_to_dec( inProcessString, &startValue); 
+        if(rc == 0) 
+          rc = ipmi_hex_to_dec( rangeString, &endValue); 
+
+        if(rc == 0)
+        {  
+          if(((startValue % 2) == 0) && ((endValue % 2) == 0))
+          {
+            do
+            {
+              pHexList[listOffset++] = startValue;
+              startValue += 2;
+            }
+            while(startValue != endValue);
+            pHexList[listOffset++] = endValue;
+          }
+          else
+          {
+            lprintf(LOG_ERR, "I2C address provided value must be even.");
+          }
+        }
+      }
+
+      if(isLast == 0) 
+      {
+        /* Setup for next string */
+        inProcessString = nextString;
+        nextString = strstr( rangeList, "," );
+      }
+    }while ((isLast == 0) && (rc == 0)); 
+  }
+
+  return rc;
+}
+
+int
+ipmi_sdr_add_from_list(struct ipmi_intf *intf, const char *rangeList)
+{
+  int i;
+  int rc = 0;
+  int slave_addr;
+  int myaddr = intf->target_addr;
+  unsigned char listValue[MAX_NUM_SLOT];
+
+  memset( listValue, 0, MAX_NUM_SLOT );
+
+  /* Build list from string */
+  if(ipmi_parse_range_list(rangeList, listValue) != 0)
+  {
+    lprintf(LOG_ERR, "Range - List invalid, cannot be parsed.");
+    return -1;
+  }
+
+  {
+    unsigned char counter = 0;
+    printf("List to scan: (Built-in) ");
+    while(listValue[counter] != 0) 
+    {
+      printf("%02x ", listValue[counter]);
+      counter++;
+    }
+    printf("\n");
+  }
+
+  printf("Clearing SDR Repository\n");
+  if (ipmi_sdr_repo_clear(intf)) {
+    lprintf(LOG_ERR, "Cannot erase SDRR. Give up.");
+    return -1;
+  }
+
+  /* First fill the SDRR from local built-in sensors */
+  printf("Sanning built-in sensors..\n");
+  rc = sdr_copy_to_sdrr(intf, 1, myaddr, myaddr);
+
+  /* Now fill the SDRR with provided sensors list */
+  {
+    unsigned char counter = 0;
+    while((rc == 0) && (listValue[counter] != 0)) 
+    {
+      slave_addr = listValue[counter];
+      printf("Scanning %02Xh..\n", slave_addr);
+      if(sdr_copy_to_sdrr(intf, 0, slave_addr, myaddr) < 0)
+      {
+         rc = -1;
+      }
+      counter++;
     }
   }
+
   return rc;
 }
 
@@ -360,6 +611,7 @@ ipmi_sdr_read_records(const char *filename, struct sdrr_queue *queue)
     if ((sdrr->raw = malloc(sdrr->length)) == NULL) {
       lprintf(LOG_ERR, "ipmitool: malloc failure");
       free(sdrr);
+      sdrr = NULL;
       rc = -1;
       break;
     }
@@ -367,7 +619,9 @@ ipmi_sdr_read_records(const char *filename, struct sdrr_queue *queue)
     if (read(fd, sdrr->raw, sdrr->length) != sdrr->length) {
       lprintf(LOG_ERR, "SDR from '%s' truncated", filename);
       free(sdrr->raw);
+      sdrr->raw = NULL;
       free(sdrr);
+      sdrr = NULL;
       rc = -1;
       break;
     }
@@ -394,7 +648,7 @@ ipmi_sdr_add_from_file(struct ipmi_intf *intf, const char *ifile)
   rc = ipmi_sdr_read_records(ifile, &sdrr_queue);
 
   if (ipmi_sdr_repo_clear(intf)) {
-    printf("Cannot erase SDRR. Give up.\n");
+    lprintf(LOG_ERR, "Cannot erase SDRR. Giving up.");
     /* FIXME: free sdr list */
     return -1;
   }
@@ -407,6 +661,7 @@ ipmi_sdr_add_from_file(struct ipmi_intf *intf, const char *ifile)
       lprintf(LOG_ERR, "Cannot add SDR ID 0x%04x to repository...", sdrr->id);
     }
     free(sdrr);
+    sdrr = NULL;
   }
   return rc;
 }

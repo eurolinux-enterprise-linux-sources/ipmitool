@@ -1,10 +1,10 @@
 Name:         ipmitool
 Summary:      ipmitool - Utility for IPMI control
-Version:      1.8.11
+Version:      1.8.15
 Release:      1%{?_distro:.%{_distro}}
 License:      BSD
 Group:        Utilities
-Packager:     Duncan Laurie <duncan@iceblink.org>
+Packager:     Jim Mankovich <jmank@hp.com>
 Source:       %{name}-%{version}.tar.gz
 Buildroot:    /var/tmp/ipmitool-root
 

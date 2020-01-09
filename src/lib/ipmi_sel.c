@@ -31,11 +31,11 @@
  */
 
 #include <string.h>
-#include <stdlib.h> /* for strtoul, to parse hexadecimal values  */
 #include <math.h>
 #define __USE_XOPEN /* glibc2 needs this for strptime */
 #include <time.h>
 #include <ctype.h>
+#include <errno.h>
 
 #include <ipmitool/helper.h>
 #include <ipmitool/log.h>
@@ -61,6 +61,12 @@ struct ipmi_sel_oem_msg_rec {
 
 #define SEL_BYTE(n) (n-3) /* So we can refer to byte positions in log entries (byte 3 is at index 0, etc) */
 
+// Definiation for the Decoding the SEL OEM Bytes for DELL Platfoms
+#define BIT(x)	 (1 << x)	/* Select the Bit */
+#define	SIZE_OF_DESC	128	/* Max Size of the description String to be displyed for the Each sel entry */
+#define	MAX_CARDNO_STR	32	/* Max Size of Card number string */
+#define	MAX_DIMM_STR	32	/* Max Size of DIMM string */
+#define	MAX_CARD_STR	32	/* Max Size of Card string */
 /*
  * Reads values found in message translation file.  XX is a wildcard, R means reserved.
  * Returns -1 for XX, -2 for R, -3 for non-hex (string), or positive integer from a hex value.
@@ -149,10 +155,12 @@ int ipmi_sel_oem_init(const char * filename)
 				for (k=3; k<17; k++) {
 					if (sel_oem_msg[j].value[SEL_BYTE(k)] == -3) {
 						free(sel_oem_msg[j].string[SEL_BYTE(k)]);
+						sel_oem_msg[j].string[SEL_BYTE(k)] = NULL;
 					}
 				}
 			}
-			free (sel_oem_msg);
+			free(sel_oem_msg);
+			sel_oem_msg = NULL;
 			return -1;
 		}
 
@@ -281,6 +289,15 @@ ipmi_get_oem(struct ipmi_intf * intf)
 		return IPMI_OEM_UNKNOWN;
 	}	
 
+	/*
+	 * Return the cached manufacturer id if the device is open and
+	 * we got an identified OEM owner.   Otherwise just attempt to read
+	 * it.
+	 */
+	if (intf->opened && intf->manufacturer_id != IPMI_OEM_UNKNOWN) {
+		return intf->manufacturer_id;
+	}
+
 	memset(&req, 0, sizeof(req));
 	req.msg.netfn = IPMI_NETFN_APP;
 	req.msg.cmd   = BMC_GET_DEVICE_ID;
@@ -292,19 +309,18 @@ ipmi_get_oem(struct ipmi_intf * intf)
 		return IPMI_OEM_UNKNOWN;
 	}
 	if (rsp->ccode > 0) {
-		lprintf(LOG_ERR, "Get Device ID command failed: %s",
-			val2str(rsp->ccode, completion_code_vals));
+		lprintf(LOG_ERR, "Get Device ID command failed: %#x %s",
+			rsp->ccode, val2str(rsp->ccode, completion_code_vals));
 		return IPMI_OEM_UNKNOWN;
 	}
 
 	devid = (struct ipm_devid_rsp *) rsp->data;
 
-	lprintf(LOG_DEBUG,"Iana: 0x%ul",
+	lprintf(LOG_DEBUG,"Iana: %u",
            IPM_DEV_MANUFACTURER_ID(devid->manufacturer_id));
 
 	return  IPM_DEV_MANUFACTURER_ID(devid->manufacturer_id);
 }
-
 
 static int
 ipmi_sel_add_entry(struct ipmi_intf * intf, struct sel_event_record * rec)
@@ -312,6 +328,7 @@ ipmi_sel_add_entry(struct ipmi_intf * intf, struct sel_event_record * rec)
 	struct ipmi_rs * rsp;
 	struct ipmi_rq req;
 
+	memset(&req, 0, sizeof(req));
 	req.msg.netfn = IPMI_NETFN_STORAGE;
 	req.msg.cmd = IPMI_CMD_ADD_SEL_ENTRY;
 	req.msg.data = (unsigned char *)rec;
@@ -381,7 +398,9 @@ ipmi_sel_add_entries_fromfile(struct ipmi_intf * intf, const char * filename)
 			if (i == 7)
 				break;
 			j = i++;
-			rqdata[j] = (uint8_t)strtol(tok, NULL, 0);
+			if (str2uchar(tok, &rqdata[j]) != 0) {
+				break;
+			}
 			tok = strtok(NULL, " ");
 		}
 		if (i < 7) {
@@ -440,7 +459,7 @@ get_kontron_evt_desc(struct ipmi_intf * intf, struct sel_event_record * rec)
 		}
 	}
 
-	return "Unsupported event";
+	return NULL;
 }
 
 char *
@@ -507,6 +526,640 @@ get_newisys_evt_desc(struct ipmi_intf * intf, struct sel_event_record * rec)
 }
 
 char *
+get_supermicro_evt_desc(struct ipmi_intf *intf, struct sel_event_record *rec)
+{
+	struct ipmi_rs *rsp;
+	struct ipmi_rq req;
+	char *desc = NULL;
+	char *str;
+	int chipset_type = 1;
+	int data1;
+	int data2;
+	int data3;
+	int length;
+	int sensor_type;
+	uint8_t i = 0;
+	uint16_t oem_id = 0;
+	/* Get the OEM event Bytes of the SEL Records byte 13, 14, 15 to
+	 * data1,data2,data3
+	 */
+	data1 = rec->sel_type.standard_type.event_data[0];
+	data2 = rec->sel_type.standard_type.event_data[1];
+	data3 = rec->sel_type.standard_type.event_data[2];
+	/* Check for the Standard Event type == 0x6F */
+	if (rec->sel_type.standard_type.event_type != 0x6F) {
+		return NULL;
+	}
+	/* Allocate mem for te Description string */
+	desc = (char *)malloc(SIZE_OF_DESC);
+	if (desc == NULL) {
+		lprintf(LOG_ERR, "ipmitool: malloc failure");
+		return NULL;
+	}
+	memset(desc,0,SIZE_OF_DESC);
+	sensor_type = rec->sel_type.standard_type.sensor_type;
+	switch (sensor_type) {
+		case SENSOR_TYPE_MEMORY:
+			memset(&req, 0, sizeof (req));
+			req.msg.netfn = IPMI_NETFN_APP;
+			req.msg.lun = 0;
+			req.msg.cmd = BMC_GET_DEVICE_ID;
+			req.msg.data = NULL;
+			req.msg.data_len = 0;
+
+			rsp = intf->sendrecv(intf, &req);
+			if (rsp == NULL) {
+				lprintf(LOG_ERR, " Error getting system info");
+				if (desc != NULL) {
+					free(desc);
+					desc = NULL;
+				}
+				return NULL;
+			} else if (rsp->ccode > 0) {
+				lprintf(LOG_ERR, " Error getting system info: %s",
+						val2str(rsp->ccode, completion_code_vals));
+				if (desc != NULL) {
+					free(desc);
+					desc = NULL;
+				}
+				return NULL;
+			}
+			/* check the chipset type */
+			oem_id = ipmi_get_oem_id(intf);
+			if (oem_id == 0) {
+				return NULL;
+			}
+			length = sizeof(supermicro_X8);
+			for (i = 0; i < length; i++) {
+				if (oem_id == supermicro_X8[i]) {
+					chipset_type = 0;
+					break;
+				}
+			}
+			length = sizeof(supermicro_x9);
+			for (i = 0; i < length; i++) {
+				if (oem_id == supermicro_x9[i]) {
+					chipset_type = 2;
+					break;
+				}
+			}
+			if (chipset_type == 0) {
+				snprintf(desc, SIZE_OF_DESC, "@DIMM%2X(CPU%x)",
+						data2,
+						(data3 & 0x03) + 1);
+			} else if (chipset_type == 1) {
+				snprintf(desc, SIZE_OF_DESC, "@DIMM%c%c(CPU%x)",
+						(data2 >> 4) + 0x40 + (data3 & 0x3) * 4,
+						(data2 & 0xf) + 0x27, (data3 & 0x03) + 1);
+			} else if (chipset_type == 2) {
+				snprintf(desc, SIZE_OF_DESC, "@DIMM%c%c(CPU%x)",
+						(data2 >> 4) + 0x40 + (data3 & 0x3) * 3,
+						(data2 & 0xf) + 0x27, (data3 & 0x03) + 1);
+			} else {
+				snprintf(desc, SIZE_OF_DESC, "");
+			}
+			break;
+		case SENSOR_TYPE_SUPERMICRO_OEM:
+			if (data1 == 0x80 && data3 == 0xFF) {
+				if (data2 == 0x0) {
+					snprintf(desc, SIZE_OF_DESC, "BMC unexpected reset");
+				} else if (data2 == 0x1) {
+					snprintf(desc, SIZE_OF_DESC, "BMC cold reset");
+				} else if (data2 == 0x2) {
+					snprintf(desc, SIZE_OF_DESC, "BMC warm reset");
+				}
+			}
+			break;
+	}
+	return desc;
+}
+
+/*
+ * Function 	: Decoding the SEL OEM Bytes for the DELL Platforms.
+ * Description  : The below fucntion will decode the SEL Events OEM Bytes for the Dell specific	Sensors only.
+ * The below function will append the additional information Strings/description to the normal sel desc.
+ * With this the SEL will display additional information sent via OEM Bytes of the SEL Record.
+ * NOTE		: Specific to DELL Platforms only.
+ * Returns	: 	Pointer to the char string.
+ */
+char * get_dell_evt_desc(struct ipmi_intf * intf, struct sel_event_record * rec)
+{
+	int data1, data2, data3;
+	int sensor_type;
+	char *desc = NULL;
+
+	unsigned char count;
+	unsigned char node;
+	unsigned char num;
+	unsigned char dimmNum;
+	unsigned char dimmsPerNode;
+	char          dimmStr[MAX_DIMM_STR];
+	char          cardStr[MAX_CARD_STR];
+	char          numStr[MAX_CARDNO_STR];
+	char          tmpdesc[SIZE_OF_DESC];
+	char*         str;
+	unsigned char incr = 0;
+	unsigned char i=0,j = 0;
+	unsigned char postCode;
+	struct ipmi_rs *rsp;
+	struct ipmi_rq req;
+	char tmpData;
+	int version;
+	/* Get the OEM event Bytes of the SEL Records byte 13, 14, 15 to Data1,data2,data3 */
+	data1 = rec->sel_type.standard_type.event_data[0];
+	data2 = rec->sel_type.standard_type.event_data[1];
+	data3 = rec->sel_type.standard_type.event_data[2];
+	/* Check for the Standard Event type == 0x6F */
+	if (0x6F == rec->sel_type.standard_type.event_type)
+		{
+		sensor_type = rec->sel_type.standard_type.sensor_type;
+		/* Allocate mem for te Description string */
+		desc = (char*)malloc(SIZE_OF_DESC);
+		if(NULL == desc)
+			return NULL;
+		memset(desc,0,SIZE_OF_DESC);
+		memset(tmpdesc,0,SIZE_OF_DESC);
+		switch (sensor_type) {					
+			case SENSOR_TYPE_PROCESSOR:	/* Processor/CPU related OEM Sel Byte Decoding for DELL Platforms only */
+				if((OEM_CODE_IN_BYTE2 == (data1 & DATA_BYTE2_SPECIFIED_MASK)))
+				{
+					if(0x00 == (data1 & MASK_LOWER_NIBBLE))
+						snprintf(desc,SIZE_OF_DESC,"CPU Internal Err | ");
+					if(0x06 == (data1 & MASK_LOWER_NIBBLE))
+					{
+						snprintf(desc,SIZE_OF_DESC,"CPU Protocol Err | ");
+
+					}
+
+					/* change bit location to a number */
+					for (count= 0; count < 8; count++)
+					{
+					  if (BIT(count)& data2)
+					  {
+					    count++;
+						/* 0x0A - CPU sensor number */
+						if((0x06 == (data1 & MASK_LOWER_NIBBLE)) && (0x0A == rec->sel_type.standard_type.sensor_num)) 
+						    snprintf(desc,SIZE_OF_DESC,"FSB %d ",count);			// Which CPU Has generated the FSB
+						else
+						    snprintf(desc,SIZE_OF_DESC,"CPU %d | APIC ID %d ",count,data3);	/* Specific CPU related info */
+					    break;
+					  }
+					}
+				}
+			break;
+			case SENSOR_TYPE_MEMORY:	/* Memory or DIMM related OEM Sel Byte Decoding for DELL Platforms only */
+			case SENSOR_TYPE_EVT_LOG:	/* Events Logging for Memory or DIMM related OEM Sel Byte Decoding for DELL Platforms only */			
+
+				/* Get the current version of the IPMI Spec Based on that Decoding of memory info is done.*/
+				memset(&req, 0, sizeof (req));
+				req.msg.netfn = IPMI_NETFN_APP;
+				req.msg.lun = 0;
+				req.msg.cmd = BMC_GET_DEVICE_ID;
+				req.msg.data = NULL;
+				req.msg.data_len = 0;
+
+				rsp = intf->sendrecv(intf, &req);
+				if (NULL == rsp) 
+				{
+					lprintf(LOG_ERR, " Error getting system info");
+					if (desc != NULL) {
+						free(desc);
+						desc = NULL;
+					}
+					return NULL;
+				} 
+				else if (rsp->ccode > 0)
+				{
+					lprintf(LOG_ERR, " Error getting system info: %s",
+						val2str(rsp->ccode, completion_code_vals));
+					if (desc != NULL) {
+						free(desc);
+						desc = NULL;
+					}
+					return NULL;
+				}
+				version = rsp->data[4];
+				/* Memory DIMMS */
+				if( (data1 &  OEM_CODE_IN_BYTE2) || (data1 & OEM_CODE_IN_BYTE3 ) )
+				{
+					/* Memory Redundancy related oem bytes docoding .. */
+					if( (SENSOR_TYPE_MEMORY == sensor_type) && (0x0B == rec->sel_type.standard_type.event_type) )
+					{
+						if(0x00 == (data1 & MASK_LOWER_NIBBLE)) 
+						{
+							snprintf(desc,SIZE_OF_DESC," Redundancy Regained | ");
+						}
+						else if(0x01 == (data1 & MASK_LOWER_NIBBLE))
+						{
+							snprintf(desc,SIZE_OF_DESC,"Redundancy Lost | ");
+						}
+					} /* Correctable and uncorrectable ECC Error Decoding */	
+					else if(SENSOR_TYPE_MEMORY == sensor_type) 
+					{
+						if(0x00 == (data1 & MASK_LOWER_NIBBLE))
+						{
+							/* 0x1C - Memory Sensor Number */
+							if(0x1C == rec->sel_type.standard_type.sensor_num)
+							{
+								/*Add the complete information about the Memory Configs.*/
+								if((data1 &  OEM_CODE_IN_BYTE2) && (data1 & OEM_CODE_IN_BYTE3 ))
+								{
+									count = 0;
+									snprintf(desc,SIZE_OF_DESC,"CRC Error on:");
+									for(i=0;i<4;i++)
+									{
+										if((BIT(i))&(data2))
+										{
+											if(count)
+											{
+						                        str = desc+strlen(desc);
+												*str++ = ',';
+												str = '\0';
+						              					count = 0;
+											}
+											switch(i) /* Which type of memory config is present.. */
+											{
+												case 0: snprintf(tmpdesc,SIZE_OF_DESC,"South Bound Memory");
+														strcat(desc,tmpdesc);
+														count++;
+														break;
+												case 1:	snprintf(tmpdesc,SIZE_OF_DESC,"South Bound Config");
+														strcat(desc,tmpdesc);
+														count++;
+														break;
+												case 2: snprintf(tmpdesc,SIZE_OF_DESC,"North Bound memory");
+														strcat(desc,tmpdesc);
+														count++;
+														break;
+												case 3:	snprintf(tmpdesc,SIZE_OF_DESC,"North Bound memory-corr");
+														strcat(desc,tmpdesc);
+														count++;
+														break;
+												default:
+														break;
+											}
+										}
+									}
+									if(data3>=0x00 && data3<0xFF)
+									{
+										snprintf(tmpdesc,SIZE_OF_DESC,"|Failing_Channel:%d",data3);
+										strcat(desc,tmpdesc);
+									}
+								}
+								break;
+							}
+							snprintf(desc,SIZE_OF_DESC,"Correctable ECC | ");
+						}
+						else if(0x01 == (data1 & MASK_LOWER_NIBBLE))  
+						{
+							snprintf(desc,SIZE_OF_DESC,"UnCorrectable ECC | ");
+						}
+					} /* Corr Memory log disabled */
+					else if(SENSOR_TYPE_EVT_LOG == sensor_type)
+					{
+						if(0x00 == (data1 & MASK_LOWER_NIBBLE)) 
+							snprintf(desc,SIZE_OF_DESC,"Corr Memory Log Disabled | ");
+					}
+				} 
+				else
+				{
+					if(SENSOR_TYPE_SYS_EVENT == sensor_type) 
+					{
+						if(0x02 == (data1 & MASK_LOWER_NIBBLE)) 
+							snprintf(desc,SIZE_OF_DESC,"Unknown System Hardware Failure ");
+					}
+					if(SENSOR_TYPE_EVT_LOG == sensor_type)
+					{
+						if(0x03 == (data1 & MASK_LOWER_NIBBLE)) 
+							snprintf(desc,SIZE_OF_DESC,"All Even Logging Dissabled");
+					}
+				}
+				/* 
+ 				 * Based on the above error, we need to find whcih memory slot or 
+ 				 * Card has got the Errors/Sel Generated.
+ 				 */
+				if(data1 & OEM_CODE_IN_BYTE2 ) 
+				{
+					/* Find the Card Type */
+					if((0x0F != (data2 >> 4)) && ((data2 >> 4) < 0x08))
+					{
+						tmpData = 	('A'+ (data2 >> 4));
+						if( (SENSOR_TYPE_MEMORY == sensor_type) && (0x0B == rec->sel_type.standard_type.event_type) )
+						{
+							snprintf(tmpdesc, SIZE_OF_DESC, "Bad Card %c", tmpData);								
+						}
+						else
+						{
+							snprintf(tmpdesc, SIZE_OF_DESC, "Card %c", tmpData);
+						}
+						strcat(desc, tmpdesc);
+					} /* Find the Bank Number of the DIMM */
+					if (0x0F != (data2 & MASK_LOWER_NIBBLE)) 
+					{
+						if(0x51  == version)
+						{
+							snprintf(tmpdesc, SIZE_OF_DESC, "Bank %d", ((data2 & 0x0F)+1));	
+							strcat(desc, tmpdesc);
+						}
+						else 
+						{
+							incr = (data2 & 0x0f) << 3;
+						}
+					}
+					
+				}
+				/* Find the DIMM Number of the Memory which has Generated the Fault or Sel */
+				if(data1 & OEM_CODE_IN_BYTE3 )
+				{
+					// Based on the IPMI Spec Need Identify the DIMM Details.
+					// For the SPEC 1.5 Only the DIMM Number is Valid.
+					if(0x51  == version) 
+					{
+						snprintf(tmpdesc, SIZE_OF_DESC, "DIMM %c", ('A'+ data3));
+						strcat(desc, tmpdesc);						
+					} 
+					/* For the SPEC 2.0 Decode the DIMM Number as it supports more.*/
+					else if( ((data2 >> 4) > 0x07) && (0x0F != (data2 >> 4) )) 
+					{
+						strcpy(dimmStr, " DIMM");
+						str = desc+strlen(desc);
+						dimmsPerNode = 4;
+						if(0x09 == (data2 >> 4)) dimmsPerNode = 6;
+						else if(0x0A == (data2 >> 4)) dimmsPerNode = 8;
+						else if(0x0B == (data2 >> 4)) dimmsPerNode = 9;
+						else if(0x0C == (data2 >> 4)) dimmsPerNode = 12;
+						else if(0x0D == (data2 >> 4)) dimmsPerNode = 24;	
+						else if(0x0E == (data2 >> 4)) dimmsPerNode = 3;							
+						count = 0;
+				        	for (i = 0; i < 8; i++)
+				        	{
+				        		if (BIT(i) & data3)
+				          		{
+								if(count)
+								{
+									strcat(str,",");
+									count = 0x00;
+								}
+				            		node = (incr + i)/dimmsPerNode;
+					            	dimmNum = ((incr + i)%dimmsPerNode)+1;
+					            	dimmStr[5] = node + 'A';
+					            	sprintf(tmpdesc,"%d",dimmNum);
+					            	for(j = 0; j < strlen(tmpdesc);j++)
+								dimmStr[6+j] = tmpdesc[j];
+							dimmStr[6+j] = '\0'; 
+							strcat(str,dimmStr); // final DIMM Details.
+		 			               	count++;
+					          	}
+					        }
+					} 
+					else
+					{
+					        strcpy(dimmStr, " DIMM");
+						str = desc+strlen(desc);
+					        count = 0;
+					        for (i = 0; i < 8; i++)
+					        {
+				        		if (BIT(i) & data3)
+				   			{
+						            // check if more than one DIMM, if so add a comma to the string.
+						        	sprintf(tmpdesc,"%d",(i + incr + 1));
+								if(count)
+								{
+									strcat(str,",");
+									count = 0x00;
+								}
+								for(j = 0; j < strlen(tmpdesc);j++)
+									dimmStr[5+j] = tmpdesc[j];
+								dimmStr[5+j] = '\0'; 
+							        strcat(str, dimmStr);
+							        count++;
+				          		}
+				        	}
+			        	}
+				}
+			break;
+			/* Sensor In system charectorization Error Decoding.
+				Sensor type  0x20*/
+			case SENSOR_TYPE_TXT_CMD_ERROR:
+				if((0x00 == (data1 & MASK_LOWER_NIBBLE))&&((data1 & OEM_CODE_IN_BYTE2) && (data1 & OEM_CODE_IN_BYTE3)))
+				{
+					switch(data3)
+					{
+						case 0x01:
+							snprintf(desc,SIZE_OF_DESC,"BIOS TXT Error");
+							break;
+						case 0x02:
+							snprintf(desc,SIZE_OF_DESC,"Processor/FIT TXT");
+							break;
+						case 0x03:
+							snprintf(desc,SIZE_OF_DESC,"BIOS ACM TXT Error");
+							break;
+						case 0x04:
+							snprintf(desc,SIZE_OF_DESC,"SINIT ACM TXT Error");
+							break;
+						case 0xff:
+							snprintf(desc,SIZE_OF_DESC,"Unrecognized TT Error12");
+							break;
+						default:
+							break;						
+					}
+				}
+			break;	
+			/* OS Watch Dog Timer Sel Events */
+			case SENSOR_TYPE_WTDOG:
+				
+				if(SENSOR_TYPE_OEM_SEC_EVENT == data1)
+				{
+					if(0x04 == data2)
+					{
+						snprintf(desc,SIZE_OF_DESC,"Hard Reset|Interrupt type None,SMS/OS Timer used at expiration");
+					}
+				}	
+				
+			break;
+						/* This Event is for BMC to Othe Hardware or CPU . */
+			case SENSOR_TYPE_VER_CHANGE:
+				if((0x02 == (data1 & MASK_LOWER_NIBBLE))&&((data1 & OEM_CODE_IN_BYTE2) && (data1 & OEM_CODE_IN_BYTE3)))
+				{
+					if(0x02 == data2)
+					{
+						if(0x00 == data3)
+						{
+							snprintf(desc, SIZE_OF_DESC, "between BMC/iDRAC Firmware and other hardware");
+						}
+						else if(0x01 == data3)
+						{
+							snprintf(desc, SIZE_OF_DESC, "between BMC/iDRAC Firmware and CPU");
+						}
+					}
+				}
+			break;
+			/* Flex or Mac tuning OEM Decoding for the DELL. */
+			case SENSOR_TYPE_OEM_SEC_EVENT:
+				/* 0x25 - Virtual MAC sensory number - Dell OEM */
+				if(0x25 == rec->sel_type.standard_type.sensor_num)
+				{
+					if(0x01 == (data1 & MASK_LOWER_NIBBLE))
+					{
+						snprintf(desc, SIZE_OF_DESC, "Failed to program Virtual Mac Address");
+						if((data1 & OEM_CODE_IN_BYTE2)&&(data1 & OEM_CODE_IN_BYTE3))
+						{
+							snprintf(tmpdesc, SIZE_OF_DESC, " at bus:%.2x device:%.2x function:%x",
+							data3 &0x7F, (data2 >> 3) & 0x1F,
+							data2 & 0x07);
+                            strcat(desc,tmpdesc);
+						}
+					}
+					else if(0x02 == (data1 & MASK_LOWER_NIBBLE))
+					{
+						snprintf(desc, SIZE_OF_DESC, "Device option ROM failed to support link tuning or flex address");
+					}
+					else if(0x03 == (data1 & MASK_LOWER_NIBBLE))
+					{
+						snprintf(desc, SIZE_OF_DESC, "Failed to get link tuning or flex address data from BMC/iDRAC");
+					}
+				}
+			break;
+			case SENSOR_TYPE_CRIT_INTR:
+			case SENSOR_TYPE_OEM_NFATAL_ERROR:	/* Non - Fatal PCIe Express Error Decoding */
+			case SENSOR_TYPE_OEM_FATAL_ERROR:	/* Fatal IO Error Decoding */
+				/* 0x29 - QPI Linx Error Sensor Dell OEM */
+				if(0x29 == rec->sel_type.standard_type.sensor_num)
+				{
+					if((0x02 == (data1 & MASK_LOWER_NIBBLE))&&((data1 & OEM_CODE_IN_BYTE2) && (data1 & OEM_CODE_IN_BYTE3)))
+					{
+						snprintf(tmpdesc, SIZE_OF_DESC, "Partner-(LinkId:%d,AgentId:%d)|",(data2 & 0xC0),(data2 & 0x30));
+						strcat(desc,tmpdesc);
+						snprintf(tmpdesc, SIZE_OF_DESC, "ReportingAgent(LinkId:%d,AgentId:%d)|",(data2 & 0x0C),(data2 & 0x03));
+						strcat(desc,tmpdesc);
+						if(0x00 == (data3 & 0xFC))
+						{
+							snprintf(tmpdesc, SIZE_OF_DESC, "LinkWidthDegraded|");
+							strcat(desc,tmpdesc);
+						}
+						if(BIT(1)& data3)
+						{
+							snprintf(tmpdesc,SIZE_OF_DESC,"PA_Type:IOH|");
+						}
+						else
+						{
+							snprintf(tmpdesc,SIZE_OF_DESC,"PA-Type:CPU|");
+						}
+						strcat(desc,tmpdesc);
+						if(BIT(0)& data3)
+						{
+							snprintf(tmpdesc,SIZE_OF_DESC,"RA-Type:IOH");
+						}
+						else
+						{
+							snprintf(tmpdesc,SIZE_OF_DESC,"RA-Type:CPU");
+						}
+						strcat(desc,tmpdesc);
+					}
+				}
+				else
+				{
+
+					if(0x02 == (data1 & MASK_LOWER_NIBBLE))
+					{
+						sprintf(desc,"%s","IO channel Check NMI");
+                    }
+					else
+					{
+						if(0x00 == (data1 & MASK_LOWER_NIBBLE))
+						{
+							snprintf(desc, SIZE_OF_DESC, "%s","PCIe Error |");
+						}
+						else if(0x01 == (data1 & MASK_LOWER_NIBBLE))
+						{
+							snprintf(desc, SIZE_OF_DESC, "%s","I/O Error |");
+						}
+						else if(0x04 == (data1 & MASK_LOWER_NIBBLE))
+						{
+							snprintf(desc, SIZE_OF_DESC, "%s","PCI PERR |");
+						}
+						else if(0x05 == (data1 & MASK_LOWER_NIBBLE))
+						{
+							snprintf(desc, SIZE_OF_DESC, "%s","PCI SERR |");
+						}
+						else
+						{
+							snprintf(desc, SIZE_OF_DESC, "%s"," ");
+						}
+						if (data3 & 0x80)
+							snprintf(tmpdesc, SIZE_OF_DESC, "Slot %d", data3 & 0x7F);
+						else
+							snprintf(tmpdesc, SIZE_OF_DESC, "PCI bus:%.2x device:%.2x function:%x",
+							data3 &0x7F, (data2 >> 3) & 0x1F,
+							data2 & 0x07);
+
+						strcat(desc,tmpdesc);
+					}
+				}
+			break;
+			/* POST Fatal Errors generated from the  Server with much more info*/
+			case SENSOR_TYPE_FRM_PROG:
+				if((0x0F == (data1 & MASK_LOWER_NIBBLE))&&(data1 & OEM_CODE_IN_BYTE2))
+				{
+					switch(data2)
+					{
+						case 0x80:
+							snprintf(desc, SIZE_OF_DESC, "No memory is detected.");break;
+						case 0x81:
+							snprintf(desc,SIZE_OF_DESC, "Memory is detected but is not configurable.");break;
+						case 0x82:
+							snprintf(desc, SIZE_OF_DESC, "Memory is configured but not usable.");break;
+						case 0x83:
+							snprintf(desc, SIZE_OF_DESC, "System BIOS shadow failed.");break;
+						case 0x84:
+							snprintf(desc, SIZE_OF_DESC, "CMOS failed.");break;
+						case 0x85:
+							snprintf(desc, SIZE_OF_DESC, "DMA controller failed.");break;
+						case 0x86:
+							snprintf(desc, SIZE_OF_DESC, "Interrupt controller failed.");break;
+						case 0x87:
+							snprintf(desc, SIZE_OF_DESC, "Timer refresh failed.");break;
+						case 0x88:
+							snprintf(desc, SIZE_OF_DESC, "Programmable interval timer error.");break;
+						case 0x89:
+							snprintf(desc, SIZE_OF_DESC, "Parity error.");break;
+						case 0x8A:
+							snprintf(desc, SIZE_OF_DESC, "SIO failed.");break;
+						case 0x8B:
+							snprintf(desc, SIZE_OF_DESC, "Keyboard controller failed.");break;
+						case 0x8C:
+							snprintf(desc, SIZE_OF_DESC, "System management interrupt initialization failed.");break;
+						case 0x8D:
+							snprintf(desc, SIZE_OF_DESC, "TXT-SX Error.");break;
+						case 0xC0:
+							snprintf(desc, SIZE_OF_DESC, "Shutdown test failed.");break;
+						case 0xC1:
+							snprintf(desc, SIZE_OF_DESC, "BIOS POST memory test failed.");break;
+						case 0xC2:
+							snprintf(desc, SIZE_OF_DESC, "RAC configuration failed.");break;
+						case 0xC3:
+							snprintf(desc, SIZE_OF_DESC, "CPU configuration failed.");break;
+						case 0xC4:
+							snprintf(desc, SIZE_OF_DESC, "Incorrect memory configuration.");break;
+						case 0xFE:
+							snprintf(desc, SIZE_OF_DESC, "General failure after video.");
+							break;
+					}
+				}
+			break;
+
+			default:
+			break;				
+		} 
+	}
+	else
+	{
+		sensor_type = rec->sel_type.standard_type.event_type;
+	}
+	return desc;
+}
+
+char *
 ipmi_get_oem_desc(struct ipmi_intf * intf, struct sel_event_record * rec)
 {
 	char * desc = NULL;
@@ -518,6 +1171,13 @@ ipmi_get_oem_desc(struct ipmi_intf * intf, struct sel_event_record * rec)
 		break;
 	case IPMI_OEM_KONTRON:
 		desc =  get_kontron_evt_desc(intf, rec);
+		break;
+	case IPMI_OEM_DELL: // Dell Decoding of the OEM Bytes from SEL Record.
+		desc = get_dell_evt_desc(intf, rec);
+		break;
+	case IPMI_OEM_SUPERMICRO:
+	case IPMI_OEM_SUPERMICRO_47488:
+		desc = get_supermicro_evt_desc(intf, rec);
 		break;
 	case IPMI_OEM_UNKNOWN:
 	default:
@@ -533,6 +1193,8 @@ ipmi_get_event_desc(struct ipmi_intf * intf, struct sel_event_record * rec, char
 {
 	uint8_t code, offset;
 	struct ipmi_event_sensor_types *evt = NULL;
+	char *sfx = NULL;	/* This will be assigned if the Platform is DELL,
+				 additional info is appended to the current Description */
 
 	if (desc == NULL)
 		return;
@@ -542,7 +1204,6 @@ ipmi_get_event_desc(struct ipmi_intf * intf, struct sel_event_record * rec, char
 		*desc = ipmi_get_oem_desc(intf, rec);
 		return;
 	} else if (rec->sel_type.standard_type.event_type == 0x6f) {
-
 		if( rec->sel_type.standard_type.sensor_type >= 0xC0 &&  rec->sel_type.standard_type.sensor_type < 0xF0) {
 			IPMI_OEM iana = ipmi_get_oem(intf);
 
@@ -554,16 +1215,68 @@ ipmi_get_event_desc(struct ipmi_intf * intf, struct sel_event_record * rec, char
 					evt = oem_kontron_event_types;
 					code = rec->sel_type.standard_type.sensor_type;
 				 break;
+				case IPMI_OEM_DELL:		/* OEM Bytes Decoding for DELLi */
+					evt = sensor_specific_types;
+					code = rec->sel_type.standard_type.sensor_type;
+				 	if ( (OEM_CODE_IN_BYTE2 == (rec->sel_type.standard_type.event_data[0] & DATA_BYTE2_SPECIFIED_MASK)) ||
+					     (OEM_CODE_IN_BYTE3 == (rec->sel_type.standard_type.event_data[0] & DATA_BYTE3_SPECIFIED_MASK)) )
+				 	{
+				 		if(rec->sel_type.standard_type.event_data[0] & DATA_BYTE2_SPECIFIED_MASK)
+						 	evt->data = rec->sel_type.standard_type.event_data[1];
+
+						 sfx = ipmi_get_oem_desc(intf, rec);
+				 	}
+				 break;
+				case IPMI_OEM_SUPERMICRO:
+				case IPMI_OEM_SUPERMICRO_47488:
+					evt = sensor_specific_types;
+					code = rec->sel_type.standard_type.sensor_type;
+					sfx = ipmi_get_oem_desc(intf, rec);
+					break;
 				 /* add your oem sensor assignation here */
 			}			
 			if( evt == NULL ){		
 				lprintf(LOG_DEBUG, "oem sensor type %x  using standard type supplied description",
 		                          rec->sel_type.standard_type.sensor_type );
 			}
+		} else {
+			switch (ipmi_get_oem(intf)) {
+				case IPMI_OEM_SUPERMICRO:
+				case IPMI_OEM_SUPERMICRO_47488:
+					evt = sensor_specific_types;
+					code = rec->sel_type.standard_type.sensor_type;
+					sfx = ipmi_get_oem_desc(intf, rec);
+				 break;
+			}
 		}
 		if( evt == NULL ){
 			evt = sensor_specific_types;
 			code = rec->sel_type.standard_type.sensor_type;
+		}
+		/*
+ 		 * Check for the OEM DELL Interface based on the Dell Specific Vendor Code.
+ 		 * If its Dell Platform, do the OEM Byte decode from the SEL Records.
+ 		 * Additional information should be written by the ipmi_get_oem_desc()
+ 		 */
+		if(ipmi_get_oem(intf) == IPMI_OEM_DELL) {
+			code = rec->sel_type.standard_type.sensor_type;
+			if ( (OEM_CODE_IN_BYTE2 == (rec->sel_type.standard_type.event_data[0] & DATA_BYTE2_SPECIFIED_MASK)) ||
+			     (OEM_CODE_IN_BYTE3 == (rec->sel_type.standard_type.event_data[0] & DATA_BYTE3_SPECIFIED_MASK)) )
+			{
+				if(rec->sel_type.standard_type.event_data[0] & DATA_BYTE2_SPECIFIED_MASK)
+					evt->data = rec->sel_type.standard_type.event_data[1];
+					 sfx = ipmi_get_oem_desc(intf, rec);
+
+			}
+			else if(SENSOR_TYPE_OEM_SEC_EVENT == rec->sel_type.standard_type.event_data[0])
+			{
+				/* 0x23 : Sensor Number.*/
+				if(0x23 == rec->sel_type.standard_type.sensor_num)
+				{
+					evt->data = rec->sel_type.standard_type.event_data[1];
+					sfx = ipmi_get_oem_desc(intf, rec);
+				}
+			}
 		}
 	} else {
 		evt = generic_event_types;
@@ -578,16 +1291,74 @@ ipmi_get_event_desc(struct ipmi_intf * intf, struct sel_event_record * rec, char
 			 ((rec->sel_type.standard_type.event_data[0] & DATA_BYTE2_SPECIFIED_MASK) &&
 			  (evt->data == rec->sel_type.standard_type.event_data[1]))))
 		{
-			*desc = (char *)malloc(strlen(evt->desc) + 48);
-			if (*desc == NULL) {
+			/* Increase the Malloc size to current_size + Dellspecific description size */
+			*desc = (char *)malloc(strlen(evt->desc) + 48 + SIZE_OF_DESC);
+			if (NULL == *desc) {
 				lprintf(LOG_ERR, "ipmitool: malloc failure");
 				return;
 			}
-			memset(*desc, 0, strlen(evt->desc)+48);
-			sprintf(*desc, "%s", evt->desc);
+			memset(*desc, 0, strlen(evt->desc)+ 48 + SIZE_OF_DESC);
+			/*
+ 			 * Additional info is present for the DELL Platforms.
+ 			 * Append the same to the evt->desc string.
+ 			 */
+			if (sfx) {
+				sprintf(*desc, "%s (%s)", evt->desc, sfx);
+				free(sfx);
+				sfx = NULL;
+			} else {
+				sprintf(*desc, "%s", evt->desc);
+			}
 			return;
 		}	
 		evt++;
+	}
+	/* The Above while Condition was not met beacouse the below sensor type were Newly defined OEM 
+	   Secondary Events. 0xC1, 0xC2, 0xC3. */	
+    if((sfx) && (0x6F == rec->sel_type.standard_type.event_type)) 
+	{
+	    uint8_t flag = 0x00;
+	    switch(code)
+		{
+            case SENSOR_TYPE_FRM_PROG:
+                 if(0x0F == offset) 
+                     flag = 0x01;			
+                 break;            
+			case SENSOR_TYPE_OEM_SEC_EVENT:
+			     if((0x01 == offset) || (0x02 == offset) || (0x03 == offset))
+                     flag = 0x01;
+                 break;
+            case SENSOR_TYPE_OEM_NFATAL_ERROR:
+                 if((0x00 == offset) || (0x02 == offset))
+                     flag = 0x01;			
+                 break;			
+            case SENSOR_TYPE_OEM_FATAL_ERROR:		
+                 if(0x01 == offset)
+                     flag = 0x01;			
+                 break;
+            case SENSOR_TYPE_SUPERMICRO_OEM:
+                 flag = 0x02;
+                 break;
+            default:
+                 break;
+		}
+		if(flag)
+		{
+		    *desc = (char *)malloc( 48 + SIZE_OF_DESC);
+		    if (NULL == *desc)
+			{
+		        lprintf(LOG_ERR, "ipmitool: malloc failure");
+			    return;
+		    }
+		memset(*desc, 0, 48 + SIZE_OF_DESC);
+		if (flag == 0x02) {
+			sprintf(*desc, "%s", sfx);
+			return;
+		}
+		sprintf(*desc, "(%s)",sfx);		
+     	}
+		free(sfx);
+		sfx = NULL;
 	}
 }
 
@@ -773,7 +1544,7 @@ ipmi_sel_get_info(struct ipmi_intf * intf)
 		printf("Alloc Unit Size  : %d\n", buf2short(rsp->data + 2));
 		printf("# Free Units     : %d\n", buf2short(rsp->data + 4));
 		printf("Largest Free Blk : %d\n", buf2short(rsp->data + 6));
-		printf("Max Record Size  : %d\n", rsp->data[7]);
+		printf("Max Record Size  : %d\n", rsp->data[8]);
 	}
 	return 0;
 }
@@ -913,8 +1684,10 @@ ipmi_sel_print_event_file(struct ipmi_intf * intf, struct sel_event_record * evt
 		evt->sel_type.standard_type.sensor_num,
 		(description != NULL) ? description : "Unknown");
 
-	if (description != NULL)
+	if (description != NULL) {
 		free(description);
+		description = NULL;
+	}
 }
 
 void
@@ -956,11 +1729,18 @@ ipmi_sel_print_std_entry(struct ipmi_intf * intf, struct sel_event_record * evt)
 	if (evt->record_type < 0xe0)
 	{
 		if ((evt->sel_type.standard_type.timestamp < 0x20000000)||(evt->sel_type.oem_ts_type.timestamp <  0x20000000)){
-			printf("Pre-Init Time-stamp");
+			printf(" Pre-Init "); 
+
 			if (csv_output)
-				printf(",,");
+				printf(",");
 			else
-				printf("   | ");
+				printf(" |");
+
+			printf("%010d", evt->sel_type.standard_type.timestamp );
+			if (csv_output)
+				printf(",");
+			else
+				printf("| ");
 		}
 		else {
 			if (evt->record_type < 0xc0)
@@ -998,7 +1778,7 @@ ipmi_sel_print_std_entry(struct ipmi_intf * intf, struct sel_event_record * evt)
 		else
 			printf(" | ");
 
-		if(evt->record_type < 0xdf)
+		if(evt->record_type <= 0xdf)
 		{
 			printf ("%02x%02x%02x", evt->sel_type.oem_ts_type.manf_id[0], evt->sel_type.oem_ts_type.manf_id[1], evt->sel_type.oem_ts_type.manf_id[2]);
 			if (csv_output)
@@ -1073,18 +1853,19 @@ ipmi_sel_print_std_entry(struct ipmi_intf * intf, struct sel_event_record * evt)
 	if (description) {
 		printf("%s", description);
 		free(description);
+		description = NULL;
 	}
 
-	if (evt->sel_type.standard_type.event_type == 0x6f) {
-		if (csv_output)
-			printf(",");
-		else
-			printf(" | ");
+	if (csv_output) {
+		printf(",");
+	} else {
+		printf(" | ");
+	}
 
-		if (evt->sel_type.standard_type.event_dir)
-			printf("Deasserted");
-		else
-			printf("Asserted");
+	if (evt->sel_type.standard_type.event_dir) {
+		printf("Deasserted");
+	} else {
+		printf("Asserted");
 	}
 
 	if (sdr != NULL && evt->sel_type.standard_type.event_type == 1) {
@@ -1093,6 +1874,7 @@ ipmi_sel_print_std_entry(struct ipmi_intf * intf, struct sel_event_record * evt)
 		 */
 		float trigger_reading = 0.0;
 		float threshold_reading = 0.0;
+		uint8_t threshold_reading_provided = 0;
 
 		/* trigger reading in event data byte 2 */
 		if (((evt->sel_type.standard_type.event_data[0] >> 6) & 3) == 1) {
@@ -1104,6 +1886,7 @@ ipmi_sel_print_std_entry(struct ipmi_intf * intf, struct sel_event_record * evt)
 		if (((evt->sel_type.standard_type.event_data[0] >> 4) & 3) == 1) {
 			threshold_reading = sdr_convert_sensor_reading(
 				sdr->record.full, evt->sel_type.standard_type.event_data[2]);
+			threshold_reading_provided = 1;
 		}
 
 		if (csv_output)
@@ -1111,21 +1894,32 @@ ipmi_sel_print_std_entry(struct ipmi_intf * intf, struct sel_event_record * evt)
 		else
 			printf(" | ");
 		
-		printf("Reading %.*f %s Threshold %.*f %s",
-		       (trigger_reading==(int)trigger_reading) ? 0 : 2,
-		       trigger_reading,
-		       ((evt->sel_type.standard_type.event_data[0] & 0xf) % 2) ? ">" : "<",
-		       (threshold_reading==(int)threshold_reading) ? 0 : 2,
-		       threshold_reading,
-		       ipmi_sdr_get_unit_string(sdr->record.full->unit.modifier,
-						sdr->record.full->unit.type.base,
-						sdr->record.full->unit.type.modifier));
+		printf("Reading %.*f",
+				(trigger_reading==(int)trigger_reading) ? 0 : 2,
+				trigger_reading);
+		if (threshold_reading_provided) {
+			printf(" %s Threshold %.*f %s",
+					((evt->sel_type.standard_type.event_data[0] & 0xf) % 2) ? ">" : "<",
+					(threshold_reading==(int)threshold_reading) ? 0 : 2,
+					threshold_reading,
+					ipmi_sdr_get_unit_string(sdr->record.common->unit.pct,
+						sdr->record.common->unit.modifier,
+						sdr->record.common->unit.type.base,
+						sdr->record.common->unit.type.modifier));
+		}
 	}
 	else if (evt->sel_type.standard_type.event_type == 0x6f) {
+		int print_sensor = 1;
+		switch (ipmi_get_oem(intf)) {
+			case IPMI_OEM_SUPERMICRO:
+			case IPMI_OEM_SUPERMICRO_47488:
+				print_sensor = 0;
+			 break;
+		}
 		/*
 		 * Sensor-Specific Discrete
 		 */
-		if (evt->sel_type.standard_type.sensor_type == 0xC &&
+		if (print_sensor && evt->sel_type.standard_type.sensor_type == 0xC && /*TODO*/
 		    evt->sel_type.standard_type.sensor_num == 0 &&
 		    (evt->sel_type.standard_type.event_data[0] & 0x30) == 0x20) {
 			/* break down memory ECC reporting if we can */
@@ -1185,7 +1979,7 @@ ipmi_sel_print_std_entry_verbose(struct ipmi_intf * intf, struct sel_event_recor
 
 	if (evt->record_type >= 0xc0)
 	{
-		if(evt->record_type < 0xdf)
+		if(evt->record_type <= 0xdf)
 		{
 			printf (" Manufactacturer ID    : %02x%02x%02x\n", evt->sel_type.oem_ts_type.manf_id[0],
 			evt->sel_type.oem_ts_type.manf_id[1], evt->sel_type.oem_ts_type.manf_id[2]);
@@ -1230,6 +2024,7 @@ ipmi_sel_print_std_entry_verbose(struct ipmi_intf * intf, struct sel_event_recor
 	printf(" Description           : %s\n",
                description ? description : "");
         free(description);
+				description = NULL;
 
 	printf("\n");
 }
@@ -1248,8 +2043,9 @@ ipmi_sel_print_extended_entry_verbose(struct ipmi_intf * intf, struct sel_event_
 					  evt->sel_type.standard_type.gen_id,
 					  evt->sel_type.standard_type.sensor_num,
 					  evt->sel_type.standard_type.sensor_type);
-	if (sdr == NULL) {
-		ipmi_sel_print_std_entry_verbose(intf, evt);
+	if (sdr == NULL) 
+	{
+	    ipmi_sel_print_std_entry_verbose(intf, evt);
 		return;
 	}
 
@@ -1303,25 +2099,10 @@ ipmi_sel_print_extended_entry_verbose(struct ipmi_intf * intf, struct sel_event_
 			       sdr_convert_sensor_reading(sdr->record.full,
 							  evt->sel_type.standard_type.event_data[1]));
 			/* determine units with possible modifiers */
-			switch (sdr->record.full->unit.modifier) {
-			case 2:
-				printf(" %s * %s\n",
-				      unit_desc[sdr->record.full->unit.type.base],
-				      unit_desc[sdr->record.full->unit.type.modifier]);
-				break;
-			case 1:
-				printf(" %s/%s\n",
-				      unit_desc[sdr->record.full->unit.type.base],
-				      unit_desc[sdr->record.full->unit.type.modifier]);
-				break;
-			case 0:
-				printf(" %s\n",
-				       unit_desc[sdr->record.full->unit.type.base]);
-				break;
-			default:
-				printf("\n");
-				break;
-			}
+			printf ("%s\n", ipmi_sdr_get_unit_string(sdr->record.common->unit.pct,
+								 sdr->record.common->unit.modifier,
+								 sdr->record.common->unit.type.base,
+								 sdr->record.common->unit.type.modifier));
 			break;
 		case 2:
 			/* oem code in byte 2 */
@@ -1344,25 +2125,10 @@ ipmi_sel_print_extended_entry_verbose(struct ipmi_intf * intf, struct sel_event_
 			       sdr_convert_sensor_reading(sdr->record.full,
 							  evt->sel_type.standard_type.event_data[2]));
 			/* determine units with possible modifiers */
-			switch (sdr->record.full->unit.modifier) {
-			case 2:
-				printf(" %s * %s\n",
-				      unit_desc[sdr->record.full->unit.type.base],
-				      unit_desc[sdr->record.full->unit.type.modifier]);
-				break;
-			case 1:
-				printf(" %s/%s\n",
-				      unit_desc[sdr->record.full->unit.type.base],
-				      unit_desc[sdr->record.full->unit.type.modifier]);
-				break;
-			case 0:
-				printf(" %s\n",
-				       unit_desc[sdr->record.full->unit.type.base]);
-				break;
-			default:
-				printf("\n");
-				break;
-			}
+			printf ("%s\n", ipmi_sdr_get_unit_string(sdr->record.common->unit.pct,
+								 sdr->record.common->unit.modifier,
+								 sdr->record.common->unit.type.base,
+								 sdr->record.common->unit.type.modifier));
 			break;
 		case 2:
 			/* OEM code in byte 3 */
@@ -1378,9 +2144,10 @@ ipmi_sel_print_extended_entry_verbose(struct ipmi_intf * intf, struct sel_event_
 	} else if (evt->sel_type.standard_type.event_type >= 0x2 && evt->sel_type.standard_type.event_type <= 0xc) {
 		/* Generic Discrete */
 	} else if (evt->sel_type.standard_type.event_type == 0x6f) {
+
 		/* Sensor-Specific Discrete */
-		if (evt->sel_type.standard_type.sensor_type == 0xC &&
-		    evt->sel_type.standard_type.sensor_num  == 0 &&
+		if (evt->sel_type.standard_type.sensor_type == 0xC &&		   
+		    evt->sel_type.standard_type.sensor_num  == 0 &&			 /**** THIS LOOK TO BE OEM ****/
 		    (evt->sel_type.standard_type.event_data[0] & 0x30) == 0x20)
 		{
 			/* break down memory ECC reporting if we can */
@@ -1388,10 +2155,18 @@ ipmi_sel_print_extended_entry_verbose(struct ipmi_intf * intf, struct sel_event_
 			       evt->sel_type.standard_type.event_data[2] & 0x0f,
 			       (evt->sel_type.standard_type.event_data[2] & 0xf0) >> 4);
 		}
-		else
+		else if(
+				evt->sel_type.standard_type.sensor_type == 0x2b &&   /* Version change */
+				evt->sel_type.standard_type.event_data[0] == 0xC1	 /* Data in Data 2 */
+			   )
+			    
+		{
+			//evt->sel_type.standard_type.event_data[1]
+		}
+		else 
 		{
 			/* FIXME : Add sensor specific discrete types */
-			printf(" Event Interpretation Missing\n");
+			printf(" Event Interpretation  : Missing\n");
 		}
 	} else if (evt->sel_type.standard_type.event_type >= 0x70 && evt->sel_type.standard_type.event_type <= 0x7f) {
 		/* OEM */
@@ -1404,6 +2179,7 @@ ipmi_sel_print_extended_entry_verbose(struct ipmi_intf * intf, struct sel_event_
 	printf(" Description           : %s\n",
                description ? description : "");
         free(description);
+				description = NULL;
 
 	printf("\n");
 }
@@ -1549,165 +2325,230 @@ ipmi_sel_save_entries(struct ipmi_intf * intf, int count, const char * savefile)
  *        -1 on error
  */
 static int
-ipmi_sel_interpret(struct ipmi_intf * intf, unsigned long iana, const char * readfile, const char *format)
+ipmi_sel_interpret(struct ipmi_intf *intf, unsigned long iana,
+		const char *readfile, const char *format)
 {
-	FILE* fp = 0;
-	int status = 0;
-
+	FILE *fp = 0;
 	struct sel_event_record evt;
-	char *buffer;
-
-
-	/* since the interface is not used, iana is taken from the command line */
+	char *buffer = NULL;
+	char *cursor = NULL;
+	int status = 0;
+	/* since the interface is not used, iana is taken from
+	 * the command line
+	 */
 	sel_iana = iana;
-
-
-	if( strncmp("pps",format,3) == 0 ) {
-			/* Parser for the following format */
-			/* 
-             0x001F: Event: at Mar 27 06:41:10 2007;from:(0x9a,0,7);				\ 
-                    sensor:(0xc3,119); event:0x6f(asserted): 0xA3 0x00 0x88   
-            commonly found in PPS shelf managers 
-            Supports a tweak for hotswap events that are already interpreted.
-         */
+	if (strncmp("pps", format, 3) == 0) {
+		/* Parser for the following format */
+		/* 0x001F: Event: at Mar 27 06:41:10 2007;from:(0x9a,0,7);
+		 * sensor:(0xc3,119); event:0x6f(asserted): 0xA3 0x00 0x88
+		 * commonly found in PPS shelf managers
+		 * Supports a tweak for hotswap events that are already interpreted.
+		 */
 		fp = ipmi_open_file(readfile, 0);
-		if (fp){
-			buffer = (char*)malloc((size_t)256);
-			if( buffer != NULL ) {		
-				do {
-					/* Only allow complete lines to be parsed,hardcoded maximum
-                  line length */
-
-					if( fgets(buffer, 256, fp) != NULL ){
-						if( strlen(buffer) < 256 )	{
-							char *cursor = buffer;
-
-							evt.record_type= 2; /* assume normal "System" event */
-							evt.record_id=
-								strtol((const char*)cursor, (char **)NULL,16);
-							
-							evt.sel_type.standard_type.evm_rev = 4;
-
-							/* FIXME: convert*/ evt.sel_type.standard_type.timestamp;
-
-							/* skip timestamp */
-							cursor = index((const char*)cursor,';');
-							cursor++;
-
-							/* FIXME: parse originator */
-							evt.sel_type.standard_type.gen_id = 0x0020;
-
-							/* skip  originator info */
-							cursor = index((const char*)cursor,';');
-							cursor++;
-
-							/* Get sensor type */
-							cursor = index((const char*)cursor,'(');
-							cursor++;
-
-							evt.sel_type.standard_type.sensor_type=
-								strtol((const char*)cursor, (char **)NULL,16);
-
-							cursor = index((const char*)cursor,',');
-							cursor++;
-
-							evt.sel_type.standard_type.sensor_num=
-								strtol((const char*)cursor, (char **)NULL,10);
-
-							/* skip  to event type  info */
-							cursor = index((const char*)cursor,':');
-							cursor++;
-
-							evt.sel_type.standard_type.event_type=
-								strtol((const char*)cursor, (char **)NULL,16);
-
-							/* skip  to event dir  info */
-							cursor = index((const char*)cursor,'(');
-							cursor++;
-							if( *cursor == 'a' ) {
-								evt.sel_type.standard_type.event_dir = 0;
-							}
-							else {
-								evt.sel_type.standard_type.event_dir = 1;
-							}
-							/* skip  to data info */
-							cursor = index((const char*)cursor,' ');
-							cursor++;
-
-							if( evt.sel_type.standard_type.sensor_type == 0xF0 ) {		
-								
-								/* got to FRU id */
-								while( !isdigit(*cursor) ){
-									cursor++;
-								}
-                        /* store FRUid */
-								evt.sel_type.standard_type.event_data[2] =
-									strtol(cursor, (char **)NULL,10);
-
-								/* Get to previous state */
-								cursor = index((const char*)cursor,'M');
-								cursor++;
-		
-
-								/* Set previous state */
-								evt.sel_type.standard_type.event_data[1] =
-									strtol(cursor, (char **)NULL,10);
-
-								/* Get to current state */
-								cursor = index((const char*)cursor,'M');
-								cursor++;
-
-
-								/* Set current state */
-								evt.sel_type.standard_type.event_data[0] =
-									0xA0 | strtol(cursor, (char **)NULL,10) ;
-
-								/* skip  to cause */
-								cursor = index((const char*)cursor,'=');
-								cursor++;							
-								evt.sel_type.standard_type.event_data[1] |=
-									(strtol(cursor, (char **)NULL,16))<<4 ; 
-							}else if( *cursor == '0' ) { 
-
-								evt.sel_type.standard_type.event_data[0]=
-									strtol((const char*)cursor, (char **)NULL,16);
-
-								cursor = index((const char*)cursor,' ');
-								cursor++;
-
-								evt.sel_type.standard_type.event_data[1]=
-									strtol((const char*)cursor, (char **)NULL,16);
-
-								cursor = index((const char*)cursor,' ');
-								cursor++;
-							
-								evt.sel_type.standard_type.event_data[2]=
-									strtol((const char*)cursor, (char **)NULL,16);
-							}else {
-								lprintf(LOG_ERR, "ipmitool: can't guess format.");
-							}
-							
-							/* parse the PPS line into a sel_event_record */
-							if (verbose) {
-								ipmi_sel_print_std_entry_verbose(intf, &evt);
-							}
-							else {
-								ipmi_sel_print_std_entry(intf, &evt);
-							}
-						}else{   /* length didn't fit */
-							lprintf(LOG_ERR, "ipmitool: invalid entry found in file.");
-						}	
-					}else{ /* fgets failed (or reached end of file) */
-						status = -1;
-					}
-				}while (status == 0); /* until file is completely read */
-				free(buffer);
-			}	/* if memory allocation succeeded */
+		if (fp == NULL) {
+			lprintf(LOG_ERR, "Failed to open file '%s' for reading.",
+					readfile);
+			return (-1);
+		}
+		buffer = (char *)malloc((size_t)256);
+		if (buffer == NULL) {
+			lprintf(LOG_ERR, "ipmitool: malloc failure");
 			fclose(fp);
-		} 	/* if file open succeeded */
-	}	/* if format is known */
+			return (-1);
+		}
+		do {
+			/* Only allow complete lines to be parsed,
+			 * hardcoded maximum line length
+			 */
+			if (fgets(buffer, 256, fp) == NULL) {
+				status = (-1);
+				break;
+			}
+			if (strlen(buffer) > 255) {
+				lprintf(LOG_ERR, "ipmitool: invalid entry found in file.");
+				continue;
+			}
+			cursor = buffer;
+			/* assume normal "System" event */
+			evt.record_type = 2;
+			errno = 0;
+			evt.record_id = strtol((const char *)cursor, (char **)NULL, 16);
+			if (errno != 0) {
+				lprintf(LOG_ERR, "Invalid record ID.");
+				status = (-1);
+				break;
+			}	
+			evt.sel_type.standard_type.evm_rev = 4;
 
-	return status;	
+			/* FIXME: convert*/
+			evt.sel_type.standard_type.timestamp;
+
+			/* skip timestamp */
+			cursor = index((const char *)cursor, ';');
+			cursor++;
+
+			/* FIXME: parse originator */
+			evt.sel_type.standard_type.gen_id = 0x0020;
+
+			/* skip  originator info */
+			cursor = index((const char *)cursor, ';');
+			cursor++;
+
+			/* Get sensor type */
+			cursor = index((const char *)cursor, '(');
+			cursor++;
+
+			errno = 0;
+			evt.sel_type.standard_type.sensor_type =
+				strtol((const char *)cursor, (char **)NULL, 16);
+			if (errno != 0) {
+				lprintf(LOG_ERR, "Invalid Sensor Type.");
+				status = (-1);
+				break;
+			}	
+			cursor = index((const char *)cursor, ',');
+			cursor++;
+
+			errno = 0;
+			evt.sel_type.standard_type.sensor_num =
+				strtol((const char *)cursor, (char **)NULL, 10);
+			if (errno != 0) {
+				lprintf(LOG_ERR, "Invalid Sensor Number.");
+				status = (-1);
+				break;
+			}	
+
+			/* skip  to event type  info */
+			cursor = index((const char *)cursor, ':');
+			cursor++;
+
+			errno = 0;
+			evt.sel_type.standard_type.event_type=
+				strtol((const char *)cursor, (char **)NULL, 16);
+			if (errno != 0) {
+				lprintf(LOG_ERR, "Invalid Event Type.");
+				status = (-1);
+				break;
+			}	
+
+			/* skip  to event dir  info */
+			cursor = index((const char *)cursor, '(');
+			cursor++;
+			if (*cursor == 'a') {
+				evt.sel_type.standard_type.event_dir = 0;
+			} else {
+				evt.sel_type.standard_type.event_dir = 1;
+			}
+			/* skip  to data info */
+			cursor = index((const char *)cursor, ' ');
+			cursor++;
+
+			if (evt.sel_type.standard_type.sensor_type == 0xF0) {
+				/* got to FRU id */
+				while (!isdigit(*cursor)) {
+					cursor++;
+				}
+				/* store FRUid */
+				errno = 0;
+				evt.sel_type.standard_type.event_data[2] =
+					strtol(cursor, (char **)NULL, 10);
+				if (errno != 0) {
+					lprintf(LOG_ERR, "Invalid Event Data#2.");
+					status = (-1);
+					break;
+				}	
+
+				/* Get to previous state */
+				cursor = index((const char *)cursor, 'M');
+				cursor++;
+
+				/* Set previous state */
+				errno = 0;
+				evt.sel_type.standard_type.event_data[1] =
+					strtol(cursor, (char **)NULL, 10);
+				if (errno != 0) {
+					lprintf(LOG_ERR, "Invalid Event Data#1.");
+					status = (-1);
+					break;
+				}	
+
+				/* Get to current state */
+				cursor = index((const char *)cursor, 'M');
+				cursor++;
+
+				/* Set current state */
+				errno = 0;
+				evt.sel_type.standard_type.event_data[0] =
+					0xA0 | strtol(cursor, (char **)NULL, 10);
+				if (errno != 0) {
+					lprintf(LOG_ERR, "Invalid Event Data#0.");
+					status = (-1);
+					break;
+				}	
+
+				/* skip  to cause */
+				cursor = index((const char *)cursor, '=');
+				cursor++;
+				errno = 0;
+				evt.sel_type.standard_type.event_data[1] |=
+					(strtol(cursor, (char **)NULL, 16)) << 4;
+				if (errno != 0) {
+					lprintf(LOG_ERR, "Invalid Event Data#1.");
+					status = (-1);
+					break;
+				}	
+			} else if (*cursor == '0') {
+				errno = 0;
+				evt.sel_type.standard_type.event_data[0] =
+					strtol((const char *)cursor, (char **)NULL, 16);
+				if (errno != 0) {
+					lprintf(LOG_ERR, "Invalid Event Data#0.");
+					status = (-1);
+					break;
+				}	
+				cursor = index((const char *)cursor, ' ');
+				cursor++;
+
+				errno = 0;
+				evt.sel_type.standard_type.event_data[1] =
+					strtol((const char *)cursor, (char **)NULL, 16);
+				if (errno != 0) {
+					lprintf(LOG_ERR, "Invalid Event Data#1.");
+					status = (-1);
+					break;
+				}	
+
+				cursor = index((const char *)cursor, ' ');
+				cursor++;
+
+				errno = 0;
+				evt.sel_type.standard_type.event_data[2] =
+					strtol((const char *)cursor, (char **)NULL, 16);
+				if (errno != 0) {
+					lprintf(LOG_ERR, "Invalid Event Data#2.");
+					status = (-1);
+					break;
+				}	
+			} else {
+				lprintf(LOG_ERR, "ipmitool: can't guess format.");
+			}
+			/* parse the PPS line into a sel_event_record */
+			if (verbose) {
+				ipmi_sel_print_std_entry_verbose(intf, &evt);
+			} else {
+				ipmi_sel_print_std_entry(intf, &evt);
+			}
+			cursor = NULL;
+		} while (status == 0); /* until file is completely read */
+		cursor = NULL;
+		free(buffer);
+		buffer = NULL;
+		fclose(fp);
+	} else {
+		lprintf(LOG_ERR, "Given format '%s' is unknown.", format);
+		status = (-1);
+	}
+	return status;
 }
 
 
@@ -1850,7 +2691,7 @@ ipmi_sel_set_time(struct ipmi_intf * intf, const char * time_string)
 {
 	struct ipmi_rs     * rsp;
 	struct ipmi_rq       req;
-	struct tm            tm;
+	struct tm            tm = {0};
 	time_t               t;
 	uint32_t	     timei;
 	const char *         time_format = "%m/%d/%Y %H:%M:%S";
@@ -1869,6 +2710,7 @@ ipmi_sel_set_time(struct ipmi_intf * intf, const char * time_string)
 			lprintf(LOG_ERR, "Specified time could not be parsed");
 			return -1;
 		}
+		tm.tm_isdst = (-1); /* look up DST information */
 		t = mktime(&tm);
 		if (t < 0) {
 			lprintf(LOG_ERR, "Specified time could not be parsed");
@@ -1878,13 +2720,14 @@ ipmi_sel_set_time(struct ipmi_intf * intf, const char * time_string)
 
 	{
 		//modify UTC time to local time expressed in number of seconds from 1/1/70 0:0:0 1970 GMT
-		struct tm * tm_tmp;
+		struct tm * tm_tmp = {0};
 		int gt_year,gt_yday,gt_hour,lt_year,lt_yday,lt_hour;
 		int delta_hour;
 		tm_tmp=gmtime(&t);
 		gt_year=tm_tmp->tm_year;
 		gt_yday=tm_tmp->tm_yday;
 		gt_hour=tm_tmp->tm_hour;
+		memset(&*tm_tmp, 0, sizeof(struct tm));
 		tm_tmp=localtime(&t);
 		lt_year=tm_tmp->tm_year;
 		lt_yday=tm_tmp->tm_yday;
@@ -1990,6 +2833,12 @@ ipmi_sel_delete(struct ipmi_intf * intf, int argc, char ** argv)
 	for (; argc != 0; argc--)
 	{
 		id = (uint16_t) strtoul(argv[argc-1], NULL, 0);
+		if (str2ushort(argv[argc-1], &id) != 0) {
+			lprintf(LOG_ERR, "Given SEL ID '%s' is invalid.",
+					argv[argc-1]);
+			rc = (-1);
+			continue;
+		}
 		msg_data[2] = id & 0xff;
 		msg_data[3] = id >> 8;
 
@@ -2039,12 +2888,21 @@ ipmi_sel_show_entry(struct ipmi_intf * intf, int argc, char ** argv)
 	}
 
 	for (i=0; i<argc; i++) {
-		id = (uint16_t)strtol(argv[i], NULL, 0);
+		if (str2ushort(argv[i], &id) != 0) {
+			lprintf(LOG_ERR, "Given SEL ID '%s' is invalid.",
+					argv[i]);
+			rc = (-1);
+			continue;
+		}
 
 		lprintf(LOG_DEBUG, "Looking up SEL entry 0x%x", id);
 
 		/* lookup SEL entry based on ID */
-		ipmi_sel_get_std_entry(intf, id, &evt);
+		if (!ipmi_sel_get_std_entry(intf, id, &evt)) {
+			lprintf(LOG_DEBUG, "SEL Entry 0x%x not found.", id);
+			rc = (-1);
+			continue;
+		}
 		if (evt.sel_type.standard_type.sensor_num == 0 && evt.sel_type.standard_type.sensor_type == 0 && evt.record_type == 0) {
 			lprintf(LOG_WARN, "SEL Entry 0x%x not found", id);
 			rc = -1;
@@ -2064,14 +2922,11 @@ ipmi_sel_show_entry(struct ipmi_intf * intf, int argc, char ** argv)
 		verbose = verbose ? : 1;
 		switch (sdr->type) {
 		case SDR_RECORD_TYPE_FULL_SENSOR:
-			ipmi_sensor_print_full(intf, sdr->record.full);
-			entity.id = sdr->record.full->entity.id;
-			entity.instance = sdr->record.full->entity.instance;
-			break;
 		case SDR_RECORD_TYPE_COMPACT_SENSOR:
-			ipmi_sensor_print_compact(intf, sdr->record.compact);
-			entity.id = sdr->record.compact->entity.id;
-			entity.instance = sdr->record.compact->entity.instance;
+			ipmi_sensor_print_fc(intf, sdr->record.common,
+					     sdr->type);
+			entity.id = sdr->record.common->entity.id;
+			entity.instance = sdr->record.common->entity.instance;
 			break;
 		case SDR_RECORD_TYPE_EVENTONLY_SENSOR:
 			ipmi_sdr_print_sensor_eventonly(intf, sdr->record.eventonly);
@@ -2099,17 +2954,6 @@ ipmi_sel_show_entry(struct ipmi_intf * intf, int argc, char ** argv)
 	return rc;
 }
 
-static int make_int(const char *str, int *value)
-{
-	char *tmp=NULL;
-	*value = strtol(str,&tmp,0);
-	if ( tmp-str != strlen(str) )
-	{
-		return -1;
-	}
-	return 0;
-}
-
 int ipmi_sel_main(struct ipmi_intf * intf, int argc, char ** argv)
 {
 	int rc = 0;
@@ -2120,11 +2964,17 @@ int ipmi_sel_main(struct ipmi_intf * intf, int argc, char ** argv)
 		lprintf(LOG_ERR, "SEL Commands:  "
 				"info clear delete list elist get add time save readraw writeraw interpret");
 	else if (strncmp(argv[0], "interpret", 9) == 0) {
+		uint32_t iana = 0;
 		if (argc < 4) {
 			lprintf(LOG_NOTICE, "usage: sel interpret iana filename format(pps)");
 			return 0;
 		}
-		rc = ipmi_sel_interpret(intf, atol(argv[1]),argv[2],argv[3]);
+		if (str2uint(argv[1], &iana) != 0) {
+			lprintf(LOG_ERR, "Given IANA '%s' is invalid.",
+					argv[1]);
+			return (-1);
+		}
+		rc = ipmi_sel_interpret(intf, iana, argv[2], argv[3]);
 	}
 	else if (strncmp(argv[0], "info", 4) == 0)
 		rc = ipmi_sel_get_info(intf);
@@ -2197,7 +3047,7 @@ int ipmi_sel_main(struct ipmi_intf * intf, int argc, char ** argv)
 		}
 
 		if (countstr) {
-			if (make_int(countstr,&count) < 0) {
+			if (str2int(countstr, &count) != 0) {
 				lprintf(LOG_ERR, "Numeric argument required; got '%s'",
 					countstr);
 				return -1;

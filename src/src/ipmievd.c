@@ -46,9 +46,15 @@
 # include <config.h>
 #endif
 
+#if defined(HAVE_SYS_IOCCOM_H)
+# include <sys/ioccom.h>
+#endif
+
 #ifdef HAVE_PATHS_H
 # include <paths.h>
-#else
+#endif
+
+#ifndef _PATH_VARRUN 
 # define _PATH_VARRUN "/var/run/"
 #endif
 
@@ -245,6 +251,7 @@ log_event(struct ipmi_event_intf * eintf, struct sel_event_record * evt)
 			lprintf(LOG_NOTICE, "%s%s sensor - %s",
 				eintf->prefix, type, desc);
 			free(desc);
+			desc = NULL;
 		} else {
 			lprintf(LOG_NOTICE, "%s%s sensor %02x",
 				eintf->prefix, type,
@@ -272,27 +279,33 @@ log_event(struct ipmi_event_intf * eintf, struct sel_event_record * evt)
 					sdr->record.full, evt->sel_type.standard_type.event_data[2]);
 			}
 
-			lprintf(LOG_NOTICE, "%s%s sensor %s %s (Reading %.*f %s Threshold %.*f %s)",
+			lprintf(LOG_NOTICE, "%s%s sensor %s %s %s (Reading %.*f %s Threshold %.*f %s)",
 				eintf->prefix,
 				type,
 				sdr->record.full->id_string,
 				desc ? : "",
+				(evt->sel_type.standard_type.event_dir
+				 ? "Deasserted" : "Asserted"),
 				(trigger_reading==(int)trigger_reading) ? 0 : 2,
 				trigger_reading,
 				((evt->sel_type.standard_type.event_data[0] & 0xf) % 2) ? ">" : "<",
 				(threshold_reading==(int)threshold_reading) ? 0 : 2,
 				threshold_reading,
-				ipmi_sdr_get_unit_string(sdr->record.full->unit.modifier,
-							 sdr->record.full->unit.type.base,
-							 sdr->record.full->unit.type.modifier));
+				ipmi_sdr_get_unit_string(sdr->record.common->unit.pct,
+							 sdr->record.common->unit.modifier,
+							 sdr->record.common->unit.type.base,
+							 sdr->record.common->unit.type.modifier));
 		}
 		else if ((evt->sel_type.standard_type.event_type >= 0x2 && evt->sel_type.standard_type.event_type <= 0xc) ||
 			 (evt->sel_type.standard_type.event_type == 0x6f)) {
 			/*
 			 * Discrete Event
 			 */
-			lprintf(LOG_NOTICE, "%s%s sensor %s %s",
-				eintf->prefix, type, sdr->record.full->id_string, desc ? : "");
+			lprintf(LOG_NOTICE, "%s%s sensor %s %s %s",
+				eintf->prefix, type,
+				sdr->record.full->id_string, desc ? : "",
+				(evt->sel_type.standard_type.event_dir
+				 ? "Deasserted" : "Asserted"));
 			if (((evt->sel_type.standard_type.event_data[0] >> 6) & 3) == 1) {
 				/* previous state and/or severity in event data byte 2 */
 			}
@@ -301,23 +314,20 @@ log_event(struct ipmi_event_intf * eintf, struct sel_event_record * evt)
 			/*
 			 * OEM Event
 			 */
-			lprintf(LOG_NOTICE, "%s%s sensor %s %s",
-				eintf->prefix, type, sdr->record.full->id_string, desc ? : "");
+			lprintf(LOG_NOTICE, "%s%s sensor %s %s %s",
+				eintf->prefix, type,
+				sdr->record.full->id_string, desc ? : "",
+				(evt->sel_type.standard_type.event_dir
+				 ? "Deasserted" : "Asserted"));
 		}
 		break;
 
 	case SDR_RECORD_TYPE_COMPACT_SENSOR:
-		if (evt->sel_type.standard_type.event_type == 0x6f) {
-			lprintf(LOG_NOTICE, "%s%s sensor %s - %s %s",
-				eintf->prefix,
-				type, sdr->record.compact->id_string,
-				desc ? : "",
-				evt->sel_type.standard_type.event_dir ? "Deasserted" : "Asserted");
-		} else {
-			lprintf(LOG_NOTICE, "%s%s sensor %s - %s",
-				eintf->prefix, type,
-				sdr->record.compact->id_string, desc ? : "");
-		}
+		lprintf(LOG_NOTICE, "%s%s sensor %s - %s %s",
+			eintf->prefix, type,
+			sdr->record.compact->id_string, desc ? : "",
+			(evt->sel_type.standard_type.event_dir
+			 ? "Deasserted" : "Asserted"));
 		break;
 
 	default:
@@ -327,8 +337,10 @@ log_event(struct ipmi_event_intf * eintf, struct sel_event_record * evt)
 		break;
 	}
 
-	if (desc)
+	if (desc) {
 		free(desc);
+		desc = NULL;
+	}
 }
 /*************************************************************************/
 
@@ -665,6 +677,7 @@ selwatch_wait(struct ipmi_event_intf * eintf)
 		}
 		sleep(selwatch_timeout);
 	}
+	return 0;
 }
 /*************************************************************************/
 
@@ -712,7 +725,11 @@ ipmievd_main(struct ipmi_event_intf * eintf, int argc, char ** argv)
 				daemon = 0;
 		}
 		else if (strncasecmp(argv[i], "timeout=", 8) == 0) {
-			selwatch_timeout = strtoul(argv[i]+8, NULL, 0);
+			if ( (str2int(argv[i]+8, &selwatch_timeout) != 0) || 
+					selwatch_timeout < 0) {
+				lprintf(LOG_ERR, "Invalid input given or out of range for time-out.");
+				return (-1);
+			}
 		}
 		else if (strncasecmp(argv[i], "pidfile=", 8) == 0) {
 			memset(pidfile, 0, 64);
@@ -735,20 +752,28 @@ ipmievd_main(struct ipmi_event_intf * eintf, int argc, char ** argv)
 		FILE *fp;
 		struct stat st1;
 
+		if (lstat(pidfile, &st1) == 0) {
+				/* PID file already exists -> exit. */
+				lprintf(LOG_ERR, "PID file '%s' already exists.", pidfile);
+				lprintf(LOG_ERR, "Perhaps another instance is already running.");
+				return (-1);
+		}
+
 		ipmi_start_daemon(eintf->intf);
 
-		if (lstat(pidfile, &st1) == 0) {
-			/* already exists, erase first */
-			if (unlink(pidfile) != 0) {
-				lprintf(LOG_WARN, "Unable to erase pidfile");
-			}
-		}
-
+		umask(022);
 		fp = ipmi_open_file_write(pidfile);
-		if (fp != NULL) {
-			fprintf(fp, "%d\n", (int)getpid());
-			fclose(fp);
+		if (fp == NULL) {
+			/* Failed to get fp on PID file -> exit. */
+			log_halt();
+			log_init("ipmievd", daemon, verbose);
+			lprintf(LOG_ERR,
+					"Failed to open PID file '%s' for writing. Check file permission.",
+					pidfile);
+			exit(EXIT_FAILURE);
 		}
+		fprintf(fp, "%d\n", (int)getpid());
+		fclose(fp);
 	}
 
 	/* register signal handler for cleanup */

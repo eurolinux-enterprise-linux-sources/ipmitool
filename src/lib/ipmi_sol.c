@@ -71,7 +71,7 @@
 #define SOL_PARAMETER_SOL_PAYLOAD_CHANNEL       0x07
 #define SOL_PARAMETER_SOL_PAYLOAD_PORT          0x08
 
-#define MAX_SOL_RETRY           		6
+#define MAX_SOL_RETRY 6
 
 const struct valstr sol_parameter_vals[] = {
 	{ SOL_PARAMETER_SET_IN_PROGRESS,           "Set In Progress (0)" },
@@ -100,47 +100,45 @@ extern int verbose;
  * ipmi_sol_payload_access
  */
 int
-ipmi_sol_payload_access(struct ipmi_intf * intf,
-			uint8_t channel,
-			uint8_t userid,
-			int enable)
+ipmi_sol_payload_access(struct ipmi_intf * intf, uint8_t channel,
+		uint8_t userid, int enable)
 {
 	struct ipmi_rq req;
 	struct ipmi_rs *rsp;
+	int rc = (-1);
 	uint8_t data[6];
 
 	memset(&req, 0, sizeof(req));
-	req.msg.netfn	 = IPMI_NETFN_APP;
-	req.msg.cmd	 = IPMI_SET_USER_PAYLOAD_ACCESS;
-	req.msg.data	 = data;
+	req.msg.netfn = IPMI_NETFN_APP;
+	req.msg.cmd = IPMI_SET_USER_PAYLOAD_ACCESS;
+	req.msg.data = data;
 	req.msg.data_len = 6;
 
 	memset(data, 0, 6);
-
-	data[0] = channel & 0xf;	/* channel */
-	data[1] = userid & 0x3f;	/* user id */
-	if (!enable)
-		data[1] |= 0x40;	/* disable */
-	data[2] = 0x02;			/* payload 1 is SOL */
-
-	rsp = intf->sendrecv(intf, &req);
-
-	if (NULL != rsp) {
-		switch (rsp->ccode) {
-			case 0x00:
-				return 0;
-			default:
-				lprintf(LOG_ERR, "Error %sabling SOL payload for user %d on channel %d: %s",
-					enable ? "en" : "dis", userid, channel,
-					val2str(rsp->ccode, completion_code_vals));
-				break;
-		}
-	} else {
-		lprintf(LOG_ERR, "Error %sabling SOL payload for user %d on channel %d",
-			enable ? "en" : "dis", userid, channel);
+	/* channel */
+	data[0] = channel & 0xf;
+	/* user id */
+	data[1] = userid & 0x3f;
+	if (!enable) {
+		/* disable */
+		data[1] |= 0x40;
 	}
-
-	return -1;
+	/* payload 1 is SOL */
+	data[2] = 0x02;
+	rsp = intf->sendrecv(intf, &req);
+	if (rsp == NULL) {
+		lprintf(LOG_ERR, "Error %sabling SOL payload for user %d on channel %d",
+				enable ? "en" : "dis", userid, channel);
+		rc = (-1);
+	} else if (rsp->ccode != 0) {
+		lprintf(LOG_ERR, "Error %sabling SOL payload for user %d on channel %d: %s",
+				enable ? "en" : "dis", userid, channel,
+				val2str(rsp->ccode, completion_code_vals));
+		rc = (-1);
+	} else {
+		rc = 0;
+	}
+	return rc;
 }
 
 int
@@ -163,8 +161,7 @@ ipmi_sol_payload_access_status(struct ipmi_intf * intf,
 	rsp = intf->sendrecv(intf, &req);
 
 	if (rsp == NULL) {
-		lprintf(LOG_ERR, "Error: Unexpected data length (%d) received",
-			rsp->data_len);
+		lprintf(LOG_ERR, "Error. No valid response received.");
 		return -1;
 	}
 
@@ -208,7 +205,6 @@ ipmi_get_sol_info(
 	req.msg.data_len = 4;
 	req.msg.data     = data;
 
-
 	/*
 	 * set in progress
 	 */
@@ -219,70 +215,70 @@ ipmi_get_sol_info(
 	data[3] = 0x00;                          /* block selector     */
 
 	rsp = intf->sendrecv(intf, &req);
-
-	if (NULL != rsp) {
-		switch (rsp->ccode) {
-			case 0x00:
-				if (rsp->data_len == 2) {
-					params->set_in_progress = rsp->data[1];
-				} else {
-					lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
-						   "for SOL parameter '%s'",
-						   rsp->data_len,
-						   val2str(data[1], sol_parameter_vals));
-				}
-				break;
-			case 0x80:
-				lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
-				    val2str(data[1], sol_parameter_vals));
-				break;
-			default:
-				lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
-					val2str(data[1], sol_parameter_vals),
-					val2str(rsp->ccode, completion_code_vals));
-				return -1;
-		}
-	} else {
+	if (rsp == NULL) {
 		lprintf(LOG_ERR, "Error: No response requesting SOL parameter '%s'",
-			    val2str(data[1], sol_parameter_vals));
+				val2str(data[1], sol_parameter_vals));
+		return (-1);
+	}
+
+	switch (rsp->ccode) {
+		case 0x00:
+			if (rsp->data_len == 2) {
+				params->set_in_progress = rsp->data[1];
+			} else {
+				lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
+						"for SOL parameter '%s'",
+						rsp->data_len,
+						val2str(data[1], sol_parameter_vals));
+			}
+			break;
+		case 0x80:
+			lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
+					val2str(data[1], sol_parameter_vals));
+			break;
+		default:
+			lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
+				val2str(data[1], sol_parameter_vals),
+				val2str(rsp->ccode, completion_code_vals));
+			return (-1);
 	}
 
 	/*
 	 * SOL enable
 	 */
- 	memset(data, 0, sizeof(data));
+	memset(data, 0, sizeof(data));
 	data[0] = channel;                  /* channel number     */
 	data[1] = SOL_PARAMETER_SOL_ENABLE; /* parameter selector */
 	data[2] = 0x00;                     /* set selector       */
 	data[3] = 0x00;                     /* block selector     */
 
 	rsp = intf->sendrecv(intf, &req);
-
-	if (NULL != rsp) {
-		switch (rsp->ccode) {
-			case 0x00:
-				if (rsp->data_len == 2) {
-					params->enabled = rsp->data[1];
-				} else {
-					lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
-						   "for SOL parameter '%s'",
-						   rsp->data_len,
-						   val2str(data[1], sol_parameter_vals));
-				}
-				break;
-			case 0x80:
-				lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
-				    val2str(data[1], sol_parameter_vals));
-				break;
-			default:
-				lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
-					val2str(data[1], sol_parameter_vals),
-					val2str(rsp->ccode, completion_code_vals));
-				return -1;
-		}
-	} else {
+	if (rsp == NULL) {
 		lprintf(LOG_ERR, "Error: No response requesting SOL parameter '%s'",
-			    val2str(data[1], sol_parameter_vals));
+				val2str(data[1], sol_parameter_vals));
+		return (-1);
+	}
+
+	switch (rsp->ccode) {
+		case 0x00:
+			if (rsp->data_len == 2) {
+				params->enabled = rsp->data[1];
+			} else {
+				lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
+						"for SOL parameter '%s'",
+						rsp->data_len,
+						val2str(data[1], sol_parameter_vals));
+			}
+			break;
+		case 0x80:
+			lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
+					val2str(data[1], sol_parameter_vals));
+			break;
+		default:
+			lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
+				val2str(data[1], sol_parameter_vals),
+				val2str(rsp->ccode, completion_code_vals));
+			return (-1);
 	}
 
 	/*
@@ -295,33 +291,34 @@ ipmi_get_sol_info(
 	data[3] = 0x00;                             /* block selector     */
 
 	rsp = intf->sendrecv(intf, &req);
-	if (NULL != rsp) {
-		switch (rsp->ccode) {
-			case 0x00:
-				if (rsp->data_len == 2) {
-					params->force_encryption     = ((rsp->data[1] & 0x80)? 1 : 0);
-					params->force_authentication = ((rsp->data[1] & 0x40)? 1 : 0);
-					params->privilege_level      = rsp->data[1] & 0x0F;
-				} else {
-					lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
-						   "for SOL parameter '%s'",
-						   rsp->data_len,
-						   val2str(data[1], sol_parameter_vals));
-				}
-				break;
-			case 0x80:
-				lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
-				    val2str(data[1], sol_parameter_vals));
-				break;
-			default:
-				lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
-					val2str(data[1], sol_parameter_vals),
-					val2str(rsp->ccode, completion_code_vals));
-				return -1;
-		}
-	} else {
+	if (rsp == NULL) {
 		lprintf(LOG_ERR, "Error: No response requesting SOL parameter '%s'",
-			    val2str(data[1], sol_parameter_vals));
+				val2str(data[1], sol_parameter_vals));
+		return (-1);
+	}
+
+	switch (rsp->ccode) {
+		case 0x00:
+			if (rsp->data_len == 2) {
+				params->force_encryption     = ((rsp->data[1] & 0x80)? 1 : 0);
+				params->force_authentication = ((rsp->data[1] & 0x40)? 1 : 0);
+				params->privilege_level      = rsp->data[1] & 0x0F;
+			} else {
+				lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
+						"for SOL parameter '%s'",
+						rsp->data_len,
+						val2str(data[1], sol_parameter_vals));
+			}
+			break;
+		case 0x80:
+			lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
+					val2str(data[1], sol_parameter_vals));
+			break;
+		default:
+			lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
+				val2str(data[1], sol_parameter_vals),
+				val2str(rsp->ccode, completion_code_vals));
+			return (-1);
 	}
 
 	/*
@@ -334,32 +331,33 @@ ipmi_get_sol_info(
 	data[3] = 0x00;                             /* block selector     */
 
 	rsp = intf->sendrecv(intf, &req);
-	if (NULL != rsp) {
-		switch (rsp->ccode) {
-			case 0x00:
-				if (rsp->data_len == 3) {
-					params->character_accumulate_level = rsp->data[1];
-					params->character_send_threshold   = rsp->data[2];
-				} else {
-					lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
-						   "for SOL parameter '%s'",
-						   rsp->data_len,
-						   val2str(data[1], sol_parameter_vals));
-				}
-				break;
-			case 0x80:
-				lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
-				    val2str(data[1], sol_parameter_vals));
-				break;
-			default:
-				lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
-					val2str(data[1], sol_parameter_vals),
-					val2str(rsp->ccode, completion_code_vals));
-				return -1;
-		}
-	} else {
+	if (rsp == NULL) {
 		lprintf(LOG_ERR, "Error: No response requesting SOL parameter '%s'",
-			    val2str(data[1], sol_parameter_vals));
+				val2str(data[1], sol_parameter_vals));
+		return (-1);
+	}
+
+	switch (rsp->ccode) {
+		case 0x00:
+			if (rsp->data_len == 3) {
+				params->character_accumulate_level = rsp->data[1];
+				params->character_send_threshold   = rsp->data[2];
+			} else {
+				lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
+						"for SOL parameter '%s'",
+						rsp->data_len,
+						val2str(data[1], sol_parameter_vals));
+			}
+			break;
+		case 0x80:
+			lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
+					val2str(data[1], sol_parameter_vals));
+			break;
+		default:
+			lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
+				val2str(data[1], sol_parameter_vals),
+				val2str(rsp->ccode, completion_code_vals));
+			return (-1);
 	}
 
 	/*
@@ -372,32 +370,33 @@ ipmi_get_sol_info(
 	data[3] = 0x00;                    /* block selector     */
 
 	rsp = intf->sendrecv(intf, &req);
-	if (NULL != rsp) {
-		switch (rsp->ccode) {
-			case 0x00:
-				if (rsp->data_len == 3) {
-					params->retry_count    = rsp->data[1];
-					params->retry_interval = rsp->data[2];
-				} else {
-					lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
-						   "for SOL parameter '%s'",
-						   rsp->data_len,
-						   val2str(data[1], sol_parameter_vals));
-				}
-				break;
-			case 0x80:
-				lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
-				    val2str(data[1], sol_parameter_vals));
-				break;
-			default:
-				lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
-					val2str(data[1], sol_parameter_vals),
-					val2str(rsp->ccode, completion_code_vals));
-				return -1;
-		}
-	} else {
+	if (rsp == NULL) {
 		lprintf(LOG_ERR, "Error: No response requesting SOL parameter '%s'",
-			    val2str(data[1], sol_parameter_vals));
+				val2str(data[1], sol_parameter_vals));
+		return (-1);
+	}
+
+	switch (rsp->ccode) {
+		case 0x00:
+			if (rsp->data_len == 3) {
+				params->retry_count    = rsp->data[1];
+				params->retry_interval = rsp->data[2];
+			} else {
+				lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
+						"for SOL parameter '%s'",
+						rsp->data_len,
+						val2str(data[1], sol_parameter_vals));
+			}
+			break;
+		case 0x80:
+			lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
+					val2str(data[1], sol_parameter_vals));
+			break;
+		default:
+			lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
+				val2str(data[1], sol_parameter_vals),
+				val2str(rsp->ccode, completion_code_vals));
+			return (-1);
 	}
 
 	/*
@@ -405,36 +404,37 @@ ipmi_get_sol_info(
 	 */
 	memset(data, 0, sizeof(data));
 	data[0] = channel;                                 /* channel number     */
- 	data[1] = SOL_PARAMETER_SOL_NON_VOLATILE_BIT_RATE; /* parameter selector */
- 	data[2] = 0x00;                                    /* set selector       */
+	data[1] = SOL_PARAMETER_SOL_NON_VOLATILE_BIT_RATE; /* parameter selector */
+	data[2] = 0x00;                                    /* set selector       */
 	data[3] = 0x00;                                    /* block selector     */
 
 	rsp = intf->sendrecv(intf, &req);
-	if (NULL != rsp) {
-		switch (rsp->ccode) {
-			case 0x00:
-				if (rsp->data_len == 2) {
-					params->non_volatile_bit_rate = rsp->data[1] & 0x0F;
-				} else {
-					lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
-						   "for SOL parameter '%s'",
-						   rsp->data_len,
-						   val2str(data[1], sol_parameter_vals));
-				}
-				break;
-			case 0x80:
-				lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
-				    val2str(data[1], sol_parameter_vals));
-				break;
-			default:
-				lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
-					val2str(data[1], sol_parameter_vals),
-					val2str(rsp->ccode, completion_code_vals));
-				return -1;
-		}
-	} else {
+	if (rsp == NULL) {
 		lprintf(LOG_ERR, "Error: No response requesting SOL parameter '%s'",
-			    val2str(data[1], sol_parameter_vals));
+				val2str(data[1], sol_parameter_vals));
+		return (-1);
+	}
+
+	switch (rsp->ccode) {
+		case 0x00:
+			if (rsp->data_len == 2) {
+				params->non_volatile_bit_rate = rsp->data[1] & 0x0F;
+			} else {
+				lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
+						"for SOL parameter '%s'",
+						rsp->data_len,
+						val2str(data[1], sol_parameter_vals));
+			}
+			break;
+		case 0x80:
+			lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
+					val2str(data[1], sol_parameter_vals));
+			break;
+		default:
+			lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
+				val2str(data[1], sol_parameter_vals),
+				val2str(rsp->ccode, completion_code_vals));
+			return (-1);
 	}
 
 	/*
@@ -447,31 +447,32 @@ ipmi_get_sol_info(
 	data[3] = 0x00;                                /* block selector     */
 
 	rsp = intf->sendrecv(intf, &req);
-	if (NULL != rsp) {
-		switch (rsp->ccode) {
-			case 0x00:
-				if (rsp->data_len == 2) {
-					params->volatile_bit_rate = rsp->data[1] & 0x0F;
-				} else {
-					lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
-						   "for SOL parameter '%s'",
-						   rsp->data_len,
-						   val2str(data[1], sol_parameter_vals));
-				}
-				break;
-			case 0x80:
-				lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
-				    val2str(data[1], sol_parameter_vals));
-				break;
-			default:
-				lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
-					val2str(data[1], sol_parameter_vals),
-					val2str(rsp->ccode, completion_code_vals));
-				return -1;
-		}
-	} else {
+	if (rsp == NULL) {
 		lprintf(LOG_ERR, "Error: No response requesting SOL parameter '%s'",
-			    val2str(data[1], sol_parameter_vals));
+				val2str(data[1], sol_parameter_vals));
+		return (-1);
+	}
+
+	switch (rsp->ccode) {
+		case 0x00:
+			if (rsp->data_len == 2) {
+				params->volatile_bit_rate = rsp->data[1] & 0x0F;
+			} else {
+				lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
+						"for SOL parameter '%s'",
+						rsp->data_len,
+						val2str(data[1], sol_parameter_vals));
+			}
+			break;
+		case 0x80:
+			lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported",
+					val2str(data[1], sol_parameter_vals));
+			break;
+		default:
+			lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
+				val2str(data[1], sol_parameter_vals),
+				val2str(rsp->ccode, completion_code_vals));
+			return (-1);
 	}
 
 	/*
@@ -484,32 +485,33 @@ ipmi_get_sol_info(
 	data[3] = 0x00;                              /* block selector     */
 
 	rsp = intf->sendrecv(intf, &req);
-	if (NULL != rsp) {
-		switch (rsp->ccode) {
-			case 0x00:
-				if (rsp->data_len == 2) {
-					params->payload_channel = rsp->data[1];
-				} else {
-					lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
-						   "for SOL parameter '%s'",
-						   rsp->data_len,
-						   val2str(data[1], sol_parameter_vals));
-				}
-				break;
-			case 0x80:
-				lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported - defaulting to 0x%02x",
-				    val2str(data[1], sol_parameter_vals), channel);
-				params->payload_channel = channel;
-				break;
-			default:
-				lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
+	if (rsp == NULL) {
+		lprintf(LOG_ERR, "Error: No response requesting SOL parameter '%s'",
+				val2str(data[1], sol_parameter_vals));
+		return (-1);
+	}
+
+	switch (rsp->ccode) {
+		case 0x00:
+			if (rsp->data_len == 2) {
+				params->payload_channel = rsp->data[1];
+			} else {
+				lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
+						"for SOL parameter '%s'",
+						rsp->data_len,
+						val2str(data[1], sol_parameter_vals));
+			}
+			break;
+		case 0x80:
+			lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported - defaulting to 0x%02x",
+					val2str(data[1], sol_parameter_vals), channel);
+			params->payload_channel = channel;
+			break;
+		default:
+			lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
 					val2str(data[1], sol_parameter_vals),
 					val2str(rsp->ccode, completion_code_vals));
-				return -1;
-		}
-	} else {
-		lprintf(LOG_ERR, "Error: No response requesting SOL parameter '%s'",
-			    val2str(data[1], sol_parameter_vals));
+			return (-1);
 	}
 
 	/*
@@ -522,36 +524,41 @@ ipmi_get_sol_info(
 	data[3] = 0x00;                           /* block selector     */
 
 	rsp = intf->sendrecv(intf, &req);
-	if (NULL != rsp) {
-		switch (rsp->ccode) {
-			case 0x00:
-				if (rsp->data_len == 3) {
-					params->payload_port = (rsp->data[1]) |	(rsp->data[2] << 8);
-				} else {
-					lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
-						   "for SOL parameter '%s'",
-						   rsp->data_len,
-						   val2str(data[1], sol_parameter_vals));
-				}
-				break;
-			case 0x80:
-            if( intf->session != NULL ){
-               lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported - defaulting to %d", val2str(data[1], sol_parameter_vals), intf->session->port);
-               params->payload_port = intf->session->port;
-            } else {
-               lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported - can't determine which payload port to use on NULL session" );
-               return -1;               
-            }
-				break;
-			default:
-				lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
-					val2str(data[1], sol_parameter_vals),
-					val2str(rsp->ccode, completion_code_vals));
-				return -1;
-		}
-	} else {
+	if (rsp == NULL) {
 		lprintf(LOG_ERR, "Error: No response requesting SOL parameter '%s'",
-			    val2str(data[1], sol_parameter_vals));
+				val2str(data[1], sol_parameter_vals));
+		return (-1);
+	}
+
+	switch (rsp->ccode) {
+		case 0x00:
+			if (rsp->data_len == 3) {
+				params->payload_port = (rsp->data[1]) | (rsp->data[2] << 8);
+			} else {
+				lprintf(LOG_ERR, "Error: Unexpected data length (%d) received "
+						"for SOL parameter '%s'",
+						rsp->data_len,
+						val2str(data[1], sol_parameter_vals));
+			}
+			break;
+		case 0x80:
+			if( intf->session != NULL ) {
+				lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported - defaulting to %d",
+						val2str(data[1], sol_parameter_vals), intf->session->port);
+				params->payload_port = intf->session->port;
+			} else {
+				lprintf(LOG_ERR,
+						"Info: SOL parameter '%s' not supported - can't determine which "
+						"payload port to use on NULL session",
+						val2str(data[1], sol_parameter_vals));
+						return (-1);               
+			}
+			break;
+		default:
+			lprintf(LOG_ERR, "Error requesting SOL parameter '%s': %s",
+				val2str(data[1], sol_parameter_vals),
+				val2str(rsp->ccode, completion_code_vals));
+			return (-1);
 	}
 
 	return 0;
@@ -650,21 +657,14 @@ int ipmi_sol_set_param_isvalid_uint8_t( const char *strval,
 					uint8_t maxval,
 					uint8_t *out_value)
 {
-	char *end;
-	long val = strtol(strval, &end, base);
-
-	if ((val < minval)
-			|| (val > maxval)
-			|| (*end != '\0')) {
+	if (str2uchar(strval, out_value) != 0 || (*out_value < minval)
+			|| (*out_value > maxval)) {
 		lprintf(LOG_ERR, "Invalid value %s for parameter %s",
 			strval, name);
 		lprintf(LOG_ERR, "Valid values are %d-%d", minval, maxval);
 		return -1;
 	}
-	else {
-		*out_value = val;
-		return 0;
-	}
+	return 0;
 }
 
 
@@ -1226,15 +1226,15 @@ static void
 printSolEscapeSequences(struct ipmi_intf * intf)
 {
 	printf(
-		   "%c?\r\n\
-	Supported escape sequences:\r\n\
-	%c.  - terminate connection\r\n\
-	%c^Z - suspend ipmitool\r\n\
-	%c^X - suspend ipmitool, but don't restore tty on restart\r\n\
-	%cB  - send break\r\n\
-	%c?  - this message\r\n\
-	%c%c  - send the escape character by typing it twice\r\n\
-	(Note that escapes are only recognized immediately after newline.)\r\n",
+		   "%c?\n\
+	Supported escape sequences:\n\
+	%c.  - terminate connection\n\
+	%c^Z - suspend ipmitool\n\
+	%c^X - suspend ipmitool, but don't restore tty on restart\n\
+	%cB  - send break\n\
+	%c?  - this message\n\
+	%c%c  - send the escape character by typing it twice\n\
+	(Note that escapes are only recognized immediately after newline.)\n",
 		   intf->session->sol_escape_char,
 		   intf->session->sol_escape_char,
 		   intf->session->sol_escape_char,
@@ -1283,11 +1283,16 @@ output(struct ipmi_rs * rsp)
  * ipmi_sol_deactivate
  */
 static int
-ipmi_sol_deactivate(struct ipmi_intf * intf)
+ipmi_sol_deactivate(struct ipmi_intf * intf, int instance)
 {
 	struct ipmi_rs * rsp;
 	struct ipmi_rq   req;
 	uint8_t          data[6];
+
+	if ((instance <= 0) || (instance > 15)) {
+		lprintf(LOG_ERR, "Error: Instance must range from 1 to 15");
+		return -1;
+	}
 
 	memset(&req, 0, sizeof(req));
 	req.msg.netfn    = IPMI_NETFN_APP;
@@ -1296,8 +1301,8 @@ ipmi_sol_deactivate(struct ipmi_intf * intf)
 	req.msg.data     = data;
 
 	bzero(data, sizeof(data));
-	data[0] = IPMI_PAYLOAD_TYPE_SOL;  /* payload type              */
-	data[1] = 1;                      /* payload instance.  Guess! */
+	data[0] = IPMI_PAYLOAD_TYPE_SOL;  /* payload type      */
+	data[1] = instance;               /* payload instance. */
 
 	/* Lots of important data */
 	data[2] = 0;
@@ -1373,25 +1378,25 @@ processSolUserInput(
 			 */
 			switch (ch) {
 			case '.':
-				printf("%c. [terminated ipmitool]\r\n",
+				printf("%c. [terminated ipmitool]\n",
 				       intf->session->sol_escape_char);
 				retval = 1;
 				break;
 
 			case 'Z' - 64:
-				printf("%c^Z [suspend ipmitool]\r\n",
+				printf("%c^Z [suspend ipmitool]\n",
 				       intf->session->sol_escape_char);
 				suspendSelf(1); /* Restore tty back to raw */
 				continue;
 
 			case 'X' - 64:
-				printf("%c^Z [suspend ipmitool]\r\n",
+				printf("%c^Z [suspend ipmitool]\n",
 				       intf->session->sol_escape_char);
 				suspendSelf(0); /* Don't restore to raw mode */
 				continue;
 
 			case 'B':
-				printf("%cB [send break]\r\n",
+				printf("%cB [send break]\n",
 				       intf->session->sol_escape_char);
 				sendBreak(intf);
 				continue;
@@ -1472,10 +1477,7 @@ static int
 ipmi_sol_keepalive_using_sol(struct ipmi_intf * intf)
 {
 	struct ipmi_v2_payload v2_payload;
-   struct ipmi_rs * rsp = NULL;
 	struct timeval end;
-
-	int ret = 0;
 
 	if (_disable_keepalive)
 		return 0;
@@ -1483,22 +1485,20 @@ ipmi_sol_keepalive_using_sol(struct ipmi_intf * intf)
 	gettimeofday(&end, 0);
 
 	if (end.tv_sec - _start_keepalive.tv_sec > SOL_KEEPALIVE_TIMEOUT) {
-	   memset(&v2_payload, 0, sizeof(v2_payload));
-
-      v2_payload.payload.sol_packet.character_count = 0;
-
-      rsp = intf->send_sol(intf, &v2_payload);
-
+		memset(&v2_payload, 0, sizeof(v2_payload));
+		v2_payload.payload.sol_packet.character_count = 0;
+		if (intf->send_sol(intf, &v2_payload) == NULL)
+			return -1;
+		/* good return, reset start time */
 		gettimeofday(&_start_keepalive, 0);
-   }
-	return ret;
+	}
+	return 0;
 }
 
 static int
 ipmi_sol_keepalive_using_getdeviceid(struct ipmi_intf * intf)
 {
 	struct timeval  end;
-	int ret = 0;
 
 	if (_disable_keepalive)
 		return 0;
@@ -1506,16 +1506,12 @@ ipmi_sol_keepalive_using_getdeviceid(struct ipmi_intf * intf)
 	gettimeofday(&end, 0);
 
 	if (end.tv_sec - _start_keepalive.tv_sec > SOL_KEEPALIVE_TIMEOUT) {
-	   ret = intf->keepalive(intf);
-	   if ( (ret!=0) && (_keepalive_retries < SOL_KEEPALIVE_RETRIES) ) {
-         ret = 0;
-         _keepalive_retries++;
-	   }
-	   else if ((ret==0) && (_keepalive_retries > 0))
-         _keepalive_retries = 0;
+		if (intf->keepalive(intf) != 0)
+         		return -1;
+		/* good return, reset start time */
 		gettimeofday(&_start_keepalive, 0);
-   }
-	return ret;
+   	}
+	return 0;
 }
 
 
@@ -1524,7 +1520,7 @@ ipmi_sol_keepalive_using_getdeviceid(struct ipmi_intf * intf)
  * ipmi_sol_red_pill
  */
 static int
-ipmi_sol_red_pill(struct ipmi_intf * intf)
+ipmi_sol_red_pill(struct ipmi_intf * intf, int instance)
 {
 	char   * buffer;
 	int    numRead;
@@ -1536,6 +1532,10 @@ ipmi_sol_red_pill(struct ipmi_intf * intf)
 	int    buffer_size = intf->session->sol_data.max_inbound_payload_size;
 	int    keepAliveRet = 0;
 	int    retrySol = 0;
+
+	/* Subtract SOL header from max_inbound_payload_size */
+	if (buffer_size > 4)
+		buffer_size -= 4;
 
 	buffer = (char*)malloc(buffer_size);
 	if (buffer == NULL) {
@@ -1554,43 +1554,45 @@ ipmi_sol_red_pill(struct ipmi_intf * intf)
 		FD_SET(0, &read_fds);
 		FD_SET(intf->fd, &read_fds);
 
-		/* Send periodic keepalive packet */
-		if(_use_sol_for_keepalive == 0)
+		if (!ipmi_oem_active(intf,"i82571spt"))
 		{
-			keepAliveRet = ipmi_sol_keepalive_using_getdeviceid(intf);
-		}
-		else
-		{
-			keepAliveRet = ipmi_sol_keepalive_using_sol(intf);
-		}
-		
-		if (keepAliveRet != 0)
-		{
-			/*
-			 * Retrying the keep Alive before declaring a communication
-			 * lost state with the IPMC. Helpful when the payload is 
-			 * reset and brings down the connection temporarily. Otherwise,
-			 * if we send getDevice Id to check the status of IPMC during
-			 * this down time when the connection is restarting, SOL will 
-			 * exit even though the IPMC is available and the session is open.
-			 */
-			if (retrySol == MAX_SOL_RETRY)
+			/* Send periodic keepalive packet */
+			if(_use_sol_for_keepalive == 0)
 			{
-				/* no response to Get Device ID keepalive message */
-				bShouldExit = 1;
-				continue;
+				keepAliveRet = ipmi_sol_keepalive_using_getdeviceid(intf);
 			}
-			else 
-			{ 
-				retrySol++;         
+			else
+			{
+				keepAliveRet = ipmi_sol_keepalive_using_sol(intf);
 			}
-		}
-		else
-		{
-			/* if the keep Alive is successful reset retries to zero */
-			retrySol = 0;
-		}
-
+		
+			if (keepAliveRet != 0)
+			{
+				/*
+				 * Retrying the keep Alive before declaring a communication
+				 * lost state with the IPMC. Helpful when the payload is
+				 * reset and brings down the connection temporarily. Otherwise,
+				 * if we send getDevice Id to check the status of IPMC during
+				 * this down time when the connection is restarting, SOL will
+				 * exit even though the IPMC is available and the session is open.
+				 */
+				if (retrySol == MAX_SOL_RETRY)
+				{
+					/* no response to Get Device ID keepalive message */
+					bShouldExit = 1;
+					continue;
+				}
+				else
+				{
+					retrySol++;
+				}
+			}
+			else
+			{
+				/* if the keep Alive is successful reset retries to zero */
+				retrySol = 0;
+			}
+		} /* !oem="i82571spt" */
 		/* Wait up to half a second */
 		tv.tv_sec =  0;
 		tv.tv_usec = 500000;
@@ -1612,7 +1614,7 @@ ipmi_sol_red_pill(struct ipmi_intf * intf)
 			 */
 			if (FD_ISSET(0, &read_fds))
 	 		{
-				bzero(buffer, sizeof(buffer));
+				memset(buffer, 0, buffer_size);
 				numRead = read(fileno(stdin),
 							   buffer,
 							   buffer_size);
@@ -1642,14 +1644,15 @@ ipmi_sol_red_pill(struct ipmi_intf * intf)
 			else if (FD_ISSET(intf->fd, &read_fds))
 			{
 				struct ipmi_rs * rs =intf->recv_sol(intf);
-				if (! rs)
-				{
-					bShouldExit = bBmcClosedSession = 1;
-				}
-				else
+				if ( rs)
 				{
 					output(rs);
 				}
+				/*
+				 * Should recv_sol come back null, the incoming packet was not ours.
+				 * Just fall through, the keepalive logic will determine if
+				 * the BMC has dropped the session.
+				 */
  			}
 
 
@@ -1670,7 +1673,7 @@ ipmi_sol_red_pill(struct ipmi_intf * intf)
 	{
 		lprintf(LOG_ERR, "Error: No response to keepalive - Terminating session");
 		/* attempt to clean up anyway */
-		ipmi_sol_deactivate(intf);
+		ipmi_sol_deactivate(intf, instance);
 		exit(1);
 	}
 
@@ -1680,7 +1683,7 @@ ipmi_sol_red_pill(struct ipmi_intf * intf)
 		exit(1);
 	}
 	else
-		ipmi_sol_deactivate(intf);
+		ipmi_sol_deactivate(intf, instance);
 
 	return 0;
 }
@@ -1692,7 +1695,8 @@ ipmi_sol_red_pill(struct ipmi_intf * intf)
  * ipmi_sol_activate
  */
 static int
-ipmi_sol_activate(struct ipmi_intf * intf, int looptest, int interval)
+ipmi_sol_activate(struct ipmi_intf * intf, int looptest, int interval,
+		int instance)
 {
 	struct ipmi_rs * rsp;
 	struct ipmi_rq   req;
@@ -1712,6 +1716,11 @@ ipmi_sol_activate(struct ipmi_intf * intf, int looptest, int interval)
 		return -1;
 	}
 
+	if ((instance <= 0) || (instance > 15)) {
+		lprintf(LOG_ERR, "Error: Instance must range from 1 to 15");
+		return -1;
+	}
+
 
 	/*
 	 * Setup a callback so that the lanplus processing knows what
@@ -1728,7 +1737,7 @@ ipmi_sol_activate(struct ipmi_intf * intf, int looptest, int interval)
 	req.msg.data     = data;
 
 	data[0] = IPMI_PAYLOAD_TYPE_SOL;  /* payload type     */
-	data[1] = 1;                      /* payload instance */
+	data[1] = instance;               /* payload instance */
 
 	/* Lots of important data.  Most is default */
 	data[2]  = bSolEncryption?     0x80 : 0;
@@ -1737,6 +1746,20 @@ ipmi_sol_activate(struct ipmi_intf * intf, int looptest, int interval)
 
 	if (ipmi_oem_active(intf, "intelplus")) {
 		data[2] |= IPMI_SOL_BMC_ASSERTS_CTS_MASK_TRUE;
+	} else if (ipmi_oem_active(intf, "i82571spt")) {
+		/*
+		 * A quote from Intel: "Engineering believes the problem
+		 * lies within the Auxiliary data being sent with the
+		 * 'Activate Payload' command from IPMITool.  IPMITool
+		 * sends a C6h which sets some bits having to do with
+		 * encryption and some behavior dealing with CTS DCD/DSR.
+		 * I recommend that the customer modify this request
+		 * to send 08h instead. This is what our internal utility
+		 * sends and it works without issue. I will work with
+		 * engineering to ensure the settings that IPMITool uses
+		 * (C6h) are supported in the future.
+		 */
+		data[2] = 0x08;
 	} else {
 		data[2] |= IPMI_SOL_BMC_ASSERTS_CTS_MASK_FALSE;
 	}
@@ -1799,17 +1822,6 @@ ipmi_sol_activate(struct ipmi_intf * intf, int looptest, int interval)
 		(ap_rsp.payload_udp_port[1] << 8) |
 		ap_rsp.payload_udp_port[0];
 
-
-	#if WORDS_BIGENDIAN
-	intf->session->sol_data.max_inbound_payload_size =
-		BSWAP_16(intf->session->sol_data.max_inbound_payload_size);
-	intf->session->sol_data.max_outbound_payload_size =
-		BSWAP_16(intf->session->sol_data.max_outbound_payload_size);
-	intf->session->sol_data.port =
-		BSWAP_16(intf->session->sol_data.port);
-	#endif
-
-
 	intf->session->timeout = 1;
 
 
@@ -1829,12 +1841,12 @@ ipmi_sol_activate(struct ipmi_intf * intf, int looptest, int interval)
 		}
 	}
 
-	printf("[SOL Session operational.  Use %c? for help]\r\n",
+	printf("[SOL Session operational.  Use %c? for help]\n",
 	       intf->session->sol_escape_char);
 
 	if(looptest == 1)
 	{
-		ipmi_sol_deactivate(intf);
+		ipmi_sol_deactivate(intf, instance);
 		usleep(interval*1000);
 		return 0;
 	}
@@ -1845,7 +1857,7 @@ ipmi_sol_activate(struct ipmi_intf * intf, int looptest, int interval)
 	 * 1) STDIN for user input
 	 * 2) The FD for incoming SOL packets
 	 */
-	if (ipmi_sol_red_pill(intf))
+	if (ipmi_sol_red_pill(intf, instance))
 	{
 		lprintf(LOG_ERR, "Error in SOL session");
 		return -1;
@@ -1865,9 +1877,9 @@ print_sol_usage(void)
 	lprintf(LOG_NOTICE, "SOL Commands: info [<channel number>]");
 	lprintf(LOG_NOTICE, "              set <parameter> <value> [channel]");
 	lprintf(LOG_NOTICE, "              payload <enable|disable|status> [channel] [userid]");
-	lprintf(LOG_NOTICE, "              activate [<usesolkeepalive|nokeepalive>]");
-	lprintf(LOG_NOTICE, "              deactivate");
-	lprintf(LOG_NOTICE, "              looptest [<loop times>] [<loop interval(in ms)>]");
+	lprintf(LOG_NOTICE, "              activate [<usesolkeepalive|nokeepalive>] [instance=<number>]");
+	lprintf(LOG_NOTICE, "              deactivate [instance=<number>]");
+	lprintf(LOG_NOTICE, "              looptest [<loop times> [<loop interval(in ms)> [<instance>]]]");
 }
 
 
@@ -1898,197 +1910,181 @@ print_sol_set_usage(void)
 
 
 
-/*
- * ipmi_sol_main
- */
+/* ipmi_sol_main */
 int
 ipmi_sol_main(struct ipmi_intf * intf, int argc, char ** argv)
 {
 	int retval = 0;
-
-	/*
-	 * Help
-	 */
-	if (!argc || !strncmp(argv[0], "help", 4))
+	if (!argc || !strncmp(argv[0], "help", 4)) {
+		/* Help */
 		print_sol_usage();
-
-	/*
-	 * Info
-	 */
- 	else if (!strncmp(argv[0], "info", 4)) {
+	} else if (!strncmp(argv[0], "info", 4)) {
+		/* Info */
 		uint8_t channel;
-
-		if (argc == 1)
-			channel = 0x0E; /* Ask about the current channel */
-		else if (argc == 2)
-			channel = (uint8_t)strtol(argv[1], NULL, 0);
-		else
-		{
+		if (argc == 1) {
+			/* Ask about the current channel */
+			channel = 0x0E;
+		} else if (argc == 2) {
+			if (is_ipmi_channel_num(argv[1], &channel) != 0) {
+				return (-1);
+			}
+		} else {
 			print_sol_usage();
 			return -1;
 		}
-
 		retval = ipmi_print_sol_info(intf, channel);
-	}
-
-	/*
-	 * Payload enable or disable
-	 */
-	else if (!strncmp(argv[0], "payload", 7)) {
+	} else if (!strncmp(argv[0], "payload", 7)) {
+		/* Payload enable or disable */
 		uint8_t channel = 0xe;
 		uint8_t userid = 1;
 		int enable = -1;
-
-		if (argc == 1 || argc > 4)
-		{
+		if (argc == 1 || argc > 4) {
 			print_sol_usage();
 			return -1;
 		}
-
-		if (argc == 1 || argc > 4)
-		{
+		if (argc == 1 || argc > 4) {
 			print_sol_usage();
 			return -1;
 		}
-
-		if (argc >= 3)
-		{
-			channel = (uint8_t)strtol(argv[2], NULL, 0);
+		if (argc >= 3) {
+			if (is_ipmi_channel_num(argv[2], &channel) != 0) {
+				return (-1);
+			}
 		}
-		if (argc == 4)
-		{
-			userid = (uint8_t)strtol(argv[3], NULL, 0);
+		if (argc == 4) {
+			if (is_ipmi_user_id(argv[3], &userid) != 0) {
+				return (-1);
+			}
 		}
-
-		if (!strncmp(argv[1], "enable", 6))
-		{
+		if (!strncmp(argv[1], "enable", 6)) {
 			enable = 1;
-		}
-		else if (!strncmp(argv[1], "disable", 7))
-		{
+		} else if (!strncmp(argv[1], "disable", 7)) {
 			enable = 0;
-		}
-		else if (!strncmp(argv[1], "status", 6))
-		{
+		} else if (!strncmp(argv[1], "status", 6)) {
 			return ipmi_sol_payload_access_status(intf, channel, userid);
-		}
-		else
-		{
+		} else {
 			print_sol_usage();
 			return -1;
 		}
-
 		retval = ipmi_sol_payload_access(intf, channel, userid, enable);
-	}
-
-
-	/*
-	 * Set a parameter value
-	 */
-	else if (!strncmp(argv[0], "set", 3)) {
+	} else if (!strncmp(argv[0], "set", 3)) {
+		/* Set a parameter value */
 		uint8_t channel = 0xe;
 		uint8_t guard = 1;
-
-		if (argc == 3)
-		{
+		if (argc == 3) {
 			channel = 0xe;
-		}
-		else if (argc == 4)
-		{
-			if (!strncmp(argv[3], "noguard", 7))
+		} else if (argc == 4) {
+			if (!strncmp(argv[3], "noguard", 7)) {
 				guard = 0;
-			else
-				channel = (uint8_t)strtol(argv[3], NULL, 0);
-		}
-		else if (argc == 5)
-		{
-			channel = (uint8_t)strtol(argv[3], NULL, 0);
-			if (!strncmp(argv[4], "noguard", 7))
+			} else {
+				if (is_ipmi_channel_num(argv[3], &channel) != 0) {
+					return (-1);
+				}
+			}
+		} else if (argc == 5) {
+			if (is_ipmi_channel_num(argv[3], &channel) != 0) {
+				return (-1);
+			}
+			if (!strncmp(argv[4], "noguard", 7)) {
 				guard = 0;
-		}
-		else
-		{
+			}
+		} else {
 			print_sol_set_usage();
 			return -1;
 		}
-
 		retval = ipmi_sol_set_param(intf, channel, argv[1], argv[2], guard);
-	}
-
-
-	/*
-	 * Activate
-	 */
- 	else if (!strncmp(argv[0], "activate", 8)) {
-
-		if (argc > 2) {
-			print_sol_usage();
-			return -1;
-		}
-
-		if (argc == 2) {
-			if (!strncmp(argv[1], "usesolkeepalive", 15))
+	} else if (!strncmp(argv[0], "activate", 8)) {
+		/* Activate */
+		int i;
+		uint8_t instance = 1;
+		for (i = 1; i < argc; i++) {
+			if (!strncmp(argv[i], "usesolkeepalive", 15)) {
 				_use_sol_for_keepalive = 1;
-			else if (!strncmp(argv[1], "nokeepalive", 11))
+			} else if (!strncmp(argv[i], "nokeepalive", 11)) {
 				_disable_keepalive = 1;
-			else {
+			} else if (!strncmp(argv[i], "instance=", 9)) {
+				if (str2uchar(argv[i] + 9, &instance) != 0) {
+					lprintf(LOG_ERR, "Given instance '%s' is invalid.", argv[i] + 9);
+					print_sol_usage();
+					return -1;
+				}
+			} else {
 				print_sol_usage();
 				return -1;
 			}
 		}
-		retval = ipmi_sol_activate(intf, 0, 0);
-	}
-
-
-	/*
-	 * Dectivate
-	 */
-	else if (!strncmp(argv[0], "deactivate", 10))
-		retval = ipmi_sol_deactivate(intf);
-
-
-	/*
-	 * SOL loop test: Activate and then Dectivate
-	 */
-	else if (!strncmp(argv[0], "looptest", 8))
-	{
+		retval = ipmi_sol_activate(intf, 0, 0, instance);
+	} else if (!strncmp(argv[0], "deactivate", 10)) {
+		/* Dectivate */
+		int i;
+		uint8_t instance = 1;
+		for (i = 1; i < argc; i++) {
+			if (!strncmp(argv[i], "instance=", 9)) {
+				if (str2uchar(argv[i] + 9, &instance) != 0) {
+					lprintf(LOG_ERR,
+							"Given instance '%s' is invalid.",
+							argv[i] + 9);
+					print_sol_usage();
+					return -1;
+				}
+			} else {
+				print_sol_usage();
+				return -1;
+			}
+		}
+		retval = ipmi_sol_deactivate(intf, instance);
+	} else if (!strncmp(argv[0], "looptest", 8)) {
+		/* SOL loop test: Activate and then Dectivate */
 		int cnt = 200;
 		int interval = 100; /* Unit is: ms */
-
-		if (argc > 3)
-		{
+		uint8_t instance = 1;
+		if (argc > 4) {
 			print_sol_usage();
 			return -1;
 		}
-		if (argc != 1) /* at least 2 */
-		{
-			cnt = strtol(argv[1], NULL, 10);
-			if(cnt <= 0) cnt = 200;
+		if (argc != 1) {
+			/* at least 2 */
+			if (str2int(argv[1], &cnt) != 0) {
+				lprintf(LOG_ERR, "Given cnt '%s' is invalid.",
+						argv[1]);
+				return (-1);
+			}
+			if (cnt <= 0) {
+				cnt = 200;
+			}
 		}
-		if (argc == 3)
-		{
-			interval = strtol(argv[2], NULL, 10);
-			if(interval < 0) interval = 0;
+		if (argc >= 3) {
+			if (str2int(argv[2], &interval) != 0) {
+				lprintf(LOG_ERR, "Given interval '%s' is invalid.",
+						argv[2]);
+				return (-1);
+			}
+			if (interval < 0) {
+				interval = 0;
+			}
+		}
+		if (argc >= 4) {
+			if (str2uchar(argv[3], &instance) != 0) {
+				lprintf(LOG_ERR, "Given instance '%s' is invalid.",
+						argv[3]);
+				print_sol_usage();
+				return -1;
+			}
 		}
 
-		while (cnt > 0)
-		{
+		while (cnt > 0) {
 			printf("remain loop test counter: %d\n", cnt);
-			retval = ipmi_sol_activate(intf, 1, interval);
-			if (retval)
-			{
-				printf("SOL looptest failed: %d\n", retval);
+			retval = ipmi_sol_activate(intf, 1, interval, instance);
+			if (retval) {
+				printf("SOL looptest failed: %d\n",
+						retval);
 				break;
 			}
 			cnt -= 1;
 		}
-	}
-
-	else
-	{
+	} else {
 		print_sol_usage();
 		retval = -1;
 	}
-
 	return retval;
 }

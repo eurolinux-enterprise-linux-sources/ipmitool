@@ -41,6 +41,9 @@
 #include <ipmitool/helper.h>
 #include <ipmitool/ipmi_cc.h>
 
+#if HAVE_CONFIG_H
+# include <config.h>
+#endif
 
 #define IPMI_BUF_SIZE 1024
 
@@ -236,8 +239,10 @@ struct ipmi_rs {
 #define IPMI_NETFN_APP			0x6
 #define IPMI_NETFN_FIRMWARE		0x8
 #define IPMI_NETFN_STORAGE		0xa
-#define IPMI_NETFN_TRANSPORT		0xc
+#define IPMI_NETFN_TRANSPORT	0xc
 #define IPMI_NETFN_PICMG		0x2C
+#define IPMI_NETFN_DCGRP		0x2C
+#define IPMI_NETFN_OEM		0x2E
 #define IPMI_NETFN_ISOL			0x34
 #define IPMI_NETFN_TSOL			0x30
 
@@ -261,6 +266,7 @@ typedef enum IPMI_OEM {
      IPMI_OEM_DELL       = 674,
      IPMI_OEM_LMC        = 2168,
      IPMI_OEM_RADISYS    = 4337,
+     IPMI_OEM_BROADCOM   = 4413,
      IPMI_OEM_MAGNUM     = 5593,
      IPMI_OEM_TYAN       = 6653,
      IPMI_OEM_NEWISYS    = 9237,
@@ -275,7 +281,8 @@ typedef enum IPMI_OEM {
      IPMI_OEM_KONTRON    = 15000,
      IPMI_OEM_PPS        = 16394,
      IPMI_OEM_AMI        = 20974,
-     IPMI_OEM_NOKIA_SIEMENS_NETWORKS = 28458
+     IPMI_OEM_NOKIA_SIEMENS_NETWORKS = 28458,
+     IPMI_OEM_SUPERMICRO_47488 = 47488
 } IPMI_OEM;
 
 extern const struct valstr completion_code_vals[];

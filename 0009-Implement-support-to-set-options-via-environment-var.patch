@@ -1,0 +1,140 @@
+From 63bb835cea05f9699c8d9de8478a41386ae203fb Mon Sep 17 00:00:00 2001
+From: Boris Ranto <branto@redhat.com>
+Date: Wed, 11 Nov 2015 17:42:25 +0100
+Subject: [PATCH] Implement support to set options via environment
+ variables
+
+Dell seems to use few enviroment variables that are not upstream. See
+rhbz#1028163 for details.
+
+Backported by: aledvink branto
+---
+ doc/ipmitool.1  |  6 ++++-
+ lib/ipmi_main.c | 68 +++++++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 2 files changed, 71 insertions(+), 3 deletions(-)
+
+diff --git a/doc/ipmitool.1 b/doc/ipmitool.1
+index 4f9c877..4b95c6b 100644
+--- a/doc/ipmitool.1
++++ b/doc/ipmitool.1
+@@ -138,7 +138,8 @@ Use supplied Kg key for IPMIv2.0 authentication.  The default is not to
+ use any Kg key.
+ .TP 
+ \fB\-K\fR
+-Read Kg key from IPMI_KGKEY environment variable.
++Read Kg key from IPMITOOL_KGKEY or IPMI_KGKEY environment variable.
++IPMITOOL_KGKEY takes precedence.
+ .TP 
+ \fB\-l\fR <\fIlun\fP>
+ Set destination lun for raw commands.
+@@ -237,6 +238,9 @@ Change Size of Communication Channel. (OEM)
+ If no password method is specified then ipmitool will prompt the
+ user for a password. If no password is entered at the prompt,
+ the remote server password will default to NULL.
++
++All the above options may be specified using environment variable.
++Either IPMITOOL_OPTS or IPMI_OPTS. IPMITOOL_OPTS takes precedence.
+ .SH "SECURITY"
+ There are several security issues be be considered before enabling the
+ IPMI LAN interface. A remote station has the ability to control a system's power 
+diff --git a/lib/ipmi_main.c b/lib/ipmi_main.c
+index 47064be..79f4653 100644
+--- a/lib/ipmi_main.c
++++ b/lib/ipmi_main.c
+@@ -325,12 +325,23 @@ ipmi_main(int argc, char ** argv,
+ 	char sol_escape_char = SOL_ESCAPE_CHARACTER_DEFAULT;
+ 	char * devfile  = NULL;
+ 
++	int cnt = argc;
++	char **arg = argv;
++	int argecnt = 0;
++	char **arge = NULL;
++	char **narge = NULL;
++	char *argestr = NULL;
++	int voptind;
++
+ 	/* save program name */
+ 	progname = strrchr(argv[0], '/');
+ 	progname = ((progname == NULL) ? argv[0] : progname+1);
+ 	signal(SIGINT, ipmi_catch_sigint);
+ 
+-	while ((argflag = getopt(argc, (char **)argv, OPTION_STRING)) != -1)
++	do
++	{
++
++	while ((argflag = getopt(cnt, arg, OPTION_STRING)) != -1)
+ 	{
+ 		switch (argflag) {
+ 		case 'I':
+@@ -467,7 +478,18 @@ ipmi_main(int argc, char ** argv,
+ 			strncpy(kgkey, optarg, IPMI_KG_BUFFER_SIZE);
+ 			break;
+ 		case 'K':
+-			if ((tmp_env = getenv("IPMI_KGKEY"))) {
++			if ((tmp_env = getenv("IPMITOOL_KGKEY"))) {
++				if (kgkey) {
++					free(kgkey);
++					kgkey = NULL;
++				}
++				kgkey = calloc(IPMI_KG_BUFFER_SIZE, 1);
++				if (kgkey == NULL) {
++					lprintf(LOG_ERR, "%s: malloc failure", progname);
++					goto out_free;
++				}
++				strncpy(kgkey, tmp_env, IPMI_KG_BUFFER_SIZE);
++			} else if ((tmp_env = getenv("IPMI_KGKEY"))) {
+ 				if (kgkey) {
+ 					free(kgkey);
+ 					kgkey = NULL;
+@@ -725,6 +747,48 @@ ipmi_main(int argc, char ** argv,
+ 		}
+ 	}
+ 
++		if (arge == NULL) {
++			arge = malloc(sizeof(char*));
++			if (arge == NULL) {
++				lprintf(LOG_ERR, "Could not allocate memory for arguments");
++				rc = -1;
++				goto out_free;
++			}
++			arge[0] = strdup("ipmitool-env");
++			argecnt = 0;
++			if (!(argestr = getenv("IPMITOOL_OPTS"))) {
++				argestr = getenv("IPMI_OPTS");
++			}
++			if (argestr != NULL) {
++				char *tok = NULL;
++				while (tok = strtok_r(argestr, " ", &argestr)) {
++					narge = realloc(arge, sizeof(char*)*(2+argecnt));
++					if (narge == NULL) {
++						lprintf(LOG_ERR, "Could not reallocate memory for arguments");
++						rc = -1;
++						goto out_free;
++					} else {
++						arge = narge;
++						argecnt++;
++						arge[argecnt] = tok;
++					}
++				}
++				arg = arge;
++				cnt = 1+argecnt;
++				voptind = optind;
++				optind = 0;
++			} else {
++				/* no env cont skip */
++				cnt = 0;
++				voptind = optind;
++			}
++		} else {
++			/* env finished */
++			cnt = 0;
++			optind = voptind;
++		}
++	} while (arge != NULL && cnt >0);
++ 
+ 	/* check for command before doing anything */
+ 	if (argc-optind > 0 &&
+ 			strncmp(argv[optind], "help", 4) == 0) {
+-- 
+2.1.0
+

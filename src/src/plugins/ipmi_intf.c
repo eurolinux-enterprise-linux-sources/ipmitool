@@ -36,10 +36,24 @@
 #if defined(HAVE_CONFIG_H)
 # include <config.h>
 #endif
+
+#if defined(IPMI_INTF_LAN) || defined (IPMI_INTF_LANPLUS)
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <unistd.h>
+#include <netdb.h>
+#endif
+
+
 #include <ipmitool/ipmi_intf.h>
 #include <ipmitool/ipmi.h>
 #include <ipmitool/ipmi_sdr.h>
 #include <ipmitool/log.h>
+
+#define IPMI_DEFAULT_PAYLOAD_SIZE   25
 
 #ifdef IPMI_INTF_OPEN
 extern struct ipmi_intf ipmi_open_intf;
@@ -61,6 +75,13 @@ extern struct ipmi_intf ipmi_lanplus_intf;
 #endif
 #ifdef IPMI_INTF_FREE
 extern struct ipmi_intf ipmi_free_intf;
+#endif
+#ifdef IPMI_INTF_SERIAL
+extern struct ipmi_intf ipmi_serial_term_intf;
+extern struct ipmi_intf ipmi_serial_bm_intf;
+#endif
+#ifdef IPMI_INTF_DUMMY
+extern struct ipmi_intf ipmi_dummy_intf;
 #endif
 
 struct ipmi_intf * ipmi_intf_table[] = {
@@ -84,6 +105,13 @@ struct ipmi_intf * ipmi_intf_table[] = {
 #endif
 #ifdef IPMI_INTF_FREE
 	&ipmi_free_intf,
+#endif
+#ifdef IPMI_INTF_SERIAL
+	&ipmi_serial_term_intf,
+	&ipmi_serial_bm_intf,
+#endif
+#ifdef IPMI_INTF_DUMMY
+	&ipmi_dummy_intf,
 #endif
 	NULL
 };
@@ -166,15 +194,14 @@ struct ipmi_intf * ipmi_intf_load(char * name)
 void
 ipmi_intf_session_set_hostname(struct ipmi_intf * intf, char * hostname)
 {
-	if (intf->session == NULL)
+	if (intf->session == NULL || hostname == NULL) {
 		return;
-
-	memset(intf->session->hostname, 0, 16);
-
-	if (hostname != NULL) {
-		memcpy(intf->session->hostname, hostname,
-		       __min(strlen(hostname), 64));
 	}
+	if (intf->session->hostname != NULL) {
+		free(intf->session->hostname);
+		intf->session->hostname = NULL;
+	}
+	intf->session->hostname = strdup(hostname);
 }
 
 void
@@ -303,7 +330,335 @@ ipmi_intf_session_set_retry(struct ipmi_intf * intf, int retry)
 }
 
 void
+ipmi_intf_session_cleanup(struct ipmi_intf *intf)
+{
+	if (intf->session == NULL) {
+		return;
+	}
+	if (intf->session->hostname != NULL) {
+		free(intf->session->hostname);
+		intf->session->hostname = NULL;
+	}
+	free(intf->session);
+	intf->session = NULL;
+}
+
+void
 ipmi_cleanup(struct ipmi_intf * intf)
 {
 	ipmi_sdr_list_empty(intf);
+}
+
+#if defined(IPMI_INTF_LAN) || defined (IPMI_INTF_LANPLUS)
+int
+ipmi_intf_socket_connect(struct ipmi_intf * intf)
+{
+	struct ipmi_session *session;
+
+	struct sockaddr_storage addr;
+	struct addrinfo hints;
+	struct addrinfo *rp0 = NULL, *rp;
+	char service[NI_MAXSERV];
+	int rc;
+
+	if (!intf || intf->session == NULL) {
+		return -1;
+	}
+
+	session = intf->session;
+
+	if (session->hostname == NULL || strlen((const char *)session->hostname) == 0) {
+		lprintf(LOG_ERR, "No hostname specified!");
+		return -1;
+	}
+
+	/* open port to BMC */
+	memset(&addr, 0, sizeof(addr));
+
+	sprintf(service, "%d", session->port);
+	/* Obtain address(es) matching host/port */
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family   = AF_UNSPEC;    /* Allow IPv4 or IPv6 */
+	hints.ai_socktype = SOCK_DGRAM;   /* Datagram socket */
+	hints.ai_flags    = 0;            /* use AI_NUMERICSERV for no name resolution */
+	hints.ai_protocol = IPPROTO_UDP; /*  */
+
+	if (getaddrinfo(session->hostname, service, &hints, &rp0) != 0) {
+		lprintf(LOG_ERR, "Address lookup for %s failed",
+			session->hostname);
+		return -1;
+	}
+
+	/* getaddrinfo() returns a list of address structures.
+	 * Try each address until we successfully connect(2).
+	 * If socket(2) (or connect(2)) fails, we (close the socket
+	 * and) try the next address. 
+	 */
+
+	session->ai_family = AF_UNSPEC;
+	for (rp = rp0; rp != NULL; rp = rp->ai_next) {
+		/* We are only interested in IPv4 and IPv6 */
+		if ((rp->ai_family != AF_INET6) && (rp->ai_family != AF_INET)) {
+			continue;
+		}
+
+		intf->fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+		if (intf->fd == -1) {
+			continue;
+		}
+
+		if (rp->ai_family == AF_INET) {
+			if (connect(intf->fd, rp->ai_addr, rp->ai_addrlen) != -1) {
+				memcpy(&session->addr, rp->ai_addr, rp->ai_addrlen);
+				session->addrlen = rp->ai_addrlen;
+				session->ai_family = rp->ai_family;
+				break;  /* Success */
+			}
+		}  else if (rp->ai_family == AF_INET6) {
+			struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)rp->ai_addr;
+			char hbuf[NI_MAXHOST];
+			socklen_t len;
+
+			/* The scope was specified on the command line e.g. with -H FE80::219:99FF:FEA0:BD95%eth0 */
+			if (addr6->sin6_scope_id != 0) {
+				len = sizeof(struct sockaddr_in6);
+				if (getnameinfo((struct sockaddr *)addr6, len, hbuf, sizeof(hbuf), NULL, 0, NI_NUMERICHOST) == 0) {
+					lprintf(LOG_DEBUG, "Trying address: %s scope=%d", 
+						hbuf, 
+						addr6->sin6_scope_id);
+				}
+				if (connect(intf->fd, rp->ai_addr, rp->ai_addrlen) != -1) {
+					memcpy(&session->addr, rp->ai_addr, rp->ai_addrlen);
+					session->addrlen = rp->ai_addrlen;
+					session->ai_family = rp->ai_family;
+					break;  /* Success */
+				}
+			} else {
+				/* No scope specified, try to get this from the list of interfaces */
+				struct ifaddrs *ifaddrs = NULL;
+				struct ifaddrs *ifa = NULL;
+
+				if (getifaddrs(&ifaddrs) < 0) {
+					lprintf(LOG_ERR, "Interface address lookup for %s failed",
+						session->hostname);
+					break;
+				}
+
+				for (ifa = ifaddrs; ifa != NULL; ifa = ifa->ifa_next) {
+					if (ifa->ifa_addr == NULL) {
+						continue;
+					}
+
+					if (ifa->ifa_addr->sa_family == AF_INET6) {
+						struct sockaddr_in6 *tmp6 = (struct sockaddr_in6 *)ifa->ifa_addr;
+
+						/* Skip unwanted addresses */
+						if (IN6_IS_ADDR_MULTICAST(&tmp6->sin6_addr)) {
+							continue;
+						}
+						if (IN6_IS_ADDR_LOOPBACK(&tmp6->sin6_addr)) {
+							continue;
+						}
+						len = sizeof(struct sockaddr_in6);
+						if ( getnameinfo((struct sockaddr *)tmp6, len, hbuf, sizeof(hbuf), NULL, 0, NI_NUMERICHOST) == 0) {
+							lprintf(LOG_DEBUG, "Testing %s interface address: %s scope=%d", 
+								ifa->ifa_name != NULL ? ifa->ifa_name : "???", 
+								hbuf, 
+								tmp6->sin6_scope_id);
+						}
+
+						if (tmp6->sin6_scope_id != 0) {
+							addr6->sin6_scope_id = tmp6->sin6_scope_id;
+						} else {
+							/* 
+							 * No scope information in interface address information 
+							 * On some OS'es, getifaddrs() is returning out the 'kernel' representation
+							 * of scoped addresses which stores the scope in the 3rd and 4th
+							 * byte. See also this page:
+							 * http://www.freebsd.org/doc/en/books/developers-handbook/ipv6.html
+							 */
+							if (IN6_IS_ADDR_LINKLOCAL(&tmp6->sin6_addr)
+									&& (tmp6->sin6_addr.s6_addr16[1] != 0)) {
+								addr6->sin6_scope_id = ntohs(tmp6->sin6_addr.s6_addr16[1]);
+							}
+						}
+
+						/* OK, now try to connect with the scope id from this interface address */
+						if (addr6->sin6_scope_id != 0) {
+							if (connect(intf->fd, rp->ai_addr, rp->ai_addrlen) != -1) {
+								memcpy(&session->addr, rp->ai_addr, rp->ai_addrlen);
+								session->addrlen = rp->ai_addrlen;
+								session->ai_family = rp->ai_family;
+								lprintf(LOG_DEBUG, "Successful connected on %s interface with scope id %d", ifa->ifa_name, tmp6->sin6_scope_id);
+								break;  /* Success */
+							}
+						} 
+					}
+				}
+				freeifaddrs(ifaddrs);
+			}
+		}
+		if (session->ai_family != AF_UNSPEC) {
+			break;
+		}
+		close(intf->fd);
+		intf->fd = -1;
+	}
+
+	/* No longer needed */
+	freeaddrinfo(rp0);
+
+	return ((intf->fd != -1) ? 0 : -1);
+}
+#endif
+
+uint16_t
+ipmi_intf_get_max_request_data_size(struct ipmi_intf * intf)
+{
+	int16_t size;
+
+	size = intf->max_request_data_size;
+
+	/* check if request size is not specified */
+	if (!size) {
+		/*
+		 * The IPMB standard overall message length for ‘non -bridging’
+		 * messages is specified as 32 bytes, maximum, including slave
+		 * address. This sets the upper limit for typical IPMI messages.
+		 * With the exception of messages used for bridging messages to
+		 * other busses or interfaces (e.g. Master Write-Read and Send Message)
+		 * IPMI messages should be designed to fit within this 32-byte maximum.
+		 * In order to support bridging, the Master Write -Read and Send Message
+		 * commands are allowed to exceed the 32-byte maximum transaction on IPMB
+		 */
+
+		size = IPMI_DEFAULT_PAYLOAD_SIZE;
+
+		/* check if message is forwarded */
+		if (intf->target_addr && intf->target_addr != intf->my_addr) {
+			/* add Send Message request size */
+			size += 8;
+		}
+	}
+
+	/* check if message is forwarded */
+	if (intf->target_addr && intf->target_addr != intf->my_addr) {
+		/* subtract send message request size */
+		size -= 8;
+
+		/*
+		 * Check that forwarded request size is not greater
+		 * than the default payload size.
+		 */
+		if (size > IPMI_DEFAULT_PAYLOAD_SIZE) {
+			size = IPMI_DEFAULT_PAYLOAD_SIZE;
+		}
+
+		/* check for double bridging */
+		if (intf->transit_addr && intf->transit_addr != intf->target_addr) {
+			/* subtract inner send message request size */
+			size -= 8;
+		}
+	}
+
+	/* check for underflow */
+	if (size < 0) {
+		return 0;
+	}
+
+	return size;
+}
+
+uint16_t
+ipmi_intf_get_max_response_data_size(struct ipmi_intf * intf)
+{
+	int16_t size;
+
+	size = intf->max_response_data_size;
+
+	/* check if response size is not specified */
+	if (!size) {
+		/*
+		 * The IPMB standard overall message length for ‘non -bridging’
+		 * messages is specified as 32 bytes, maximum, including slave
+		 * address. This sets the upper limit for typical IPMI messages.
+		 * With the exception of messages used for bridging messages to
+		 * other busses or interfaces (e.g. Master Write-Read and Send Message)
+		 * IPMI messages should be designed to fit within this 32-byte maximum.
+		 * In order to support bridging, the Master Write -Read and Send Message
+		 * commands are allowed to exceed the 32-byte maximum transaction on IPMB
+		 */
+
+		size = IPMI_DEFAULT_PAYLOAD_SIZE; /* response length with subtracted header and checksum byte */
+
+		/* check if message is forwarded */
+		if (intf->target_addr && intf->target_addr != intf->my_addr) {
+			/* add Send Message header size */
+			size += 7;
+		}
+	}
+
+	/* check if message is forwarded */
+	if (intf->target_addr && intf->target_addr != intf->my_addr) {
+		/*
+		 * Some IPMI controllers like PICMG AMC Carriers embed responses
+		 * to the forwarded messages into the Send Message response.
+		 * In order to be sure that the response is not truncated,
+		 * subtract the internal message header size.
+		 */
+		size -= 8;
+
+		/*
+		 * Check that forwarded response is not greater
+		 * than the default payload size.
+		 */
+		if (size > IPMI_DEFAULT_PAYLOAD_SIZE) {
+			size = IPMI_DEFAULT_PAYLOAD_SIZE;
+		}
+
+		/* check for double bridging */
+		if (intf->transit_addr && intf->transit_addr != intf->target_addr) {
+			/* subtract inner send message header size */
+			size -= 8;
+		}
+	}
+
+	/* check for underflow */
+	if (size < 0) {
+		return 0;
+	}
+
+	return size;
+}
+
+void
+ipmi_intf_set_max_request_data_size(struct ipmi_intf * intf, uint16_t size)
+{
+	if (size < IPMI_DEFAULT_PAYLOAD_SIZE) {
+		lprintf(LOG_ERR, "Request size is too small (%d), leave default size",
+				size);
+		return;
+	}
+
+	if (intf->set_max_request_data_size) {
+		intf->set_max_request_data_size(intf, size);
+	} else {
+		intf->max_request_data_size = size;
+	}
+}
+
+void
+ipmi_intf_set_max_response_data_size(struct ipmi_intf * intf, uint16_t size)
+{
+	if (size < IPMI_DEFAULT_PAYLOAD_SIZE - 1) {
+		lprintf(LOG_ERR, "Response size is too small (%d), leave default size",
+				size);
+		return;
+	}
+
+	if (intf->set_max_response_data_size) {
+		intf->set_max_response_data_size(intf, size);
+	} else {
+		intf->max_response_data_size = size;
+	}
 }

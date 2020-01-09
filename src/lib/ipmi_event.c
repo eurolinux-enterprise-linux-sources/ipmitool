@@ -97,7 +97,7 @@ ipmi_send_platform_event(struct ipmi_intf * intf, struct platform_event_msg * em
 	if (chmed == IPMI_CHANNEL_MEDIUM_SYSTEM) {
 		/* system interface, need extra generator ID */
 		req.msg.data_len = 8;
-		rqdata[0] = 0x20;
+		rqdata[0] = 0x41;   // As per Fig. 29-2 and Table 5-4
 		memcpy(rqdata+1, emsg, sizeof(struct platform_event_msg));
 	}
 	else {
@@ -227,8 +227,8 @@ ipmi_event_find_offset(uint8_t code,
 static void
 print_sensor_states(uint8_t sensor_type, uint8_t event_type)
 {
-	printf("Sensor States: \n  ");
-	ipmi_sdr_print_discrete_state_mini("\n  ", sensor_type,
+	ipmi_sdr_print_discrete_state_mini(
+			"Sensor States: \n  ", "\n  ", sensor_type,
 					   event_type, 0xff, 0xff);
 	printf("\n");
 }
@@ -241,7 +241,7 @@ ipmi_event_fromsensor(struct ipmi_intf * intf, char * id, char * state, char * e
 	struct sdr_record_list * sdr;
 	struct platform_event_msg emsg;
 	int off;
-	uint8_t target, lun;
+	uint8_t target, lun, channel;
 
 	if (id == NULL) {
 		lprintf(LOG_ERR, "No sensor ID supplied");
@@ -273,23 +273,15 @@ ipmi_event_fromsensor(struct ipmi_intf * intf, char * id, char * state, char * e
 	switch (sdr->type)
 	{
 	case SDR_RECORD_TYPE_FULL_SENSOR:
-
-		emsg.sensor_type   = sdr->record.full->sensor.type;
-		emsg.sensor_num    = sdr->record.full->keys.sensor_num;
-		emsg.event_type    = sdr->record.full->event_type;
-		target    = sdr->record.full->keys.owner_id;
-		lun    = sdr->record.full->keys.lun;
-		break;
-
 	case SDR_RECORD_TYPE_COMPACT_SENSOR:
 
-		emsg.sensor_type = sdr->record.compact->sensor.type;
-		emsg.sensor_num  = sdr->record.compact->keys.sensor_num;
-		emsg.event_type  = sdr->record.compact->event_type;
-		target    = sdr->record.compact->keys.owner_id;
-		lun    = sdr->record.compact->keys.lun;
+		emsg.sensor_type   = sdr->record.common->sensor.type;
+		emsg.sensor_num    = sdr->record.common->keys.sensor_num;
+		emsg.event_type    = sdr->record.common->event_type;
+		target    = sdr->record.common->keys.owner_id;
+		lun    = sdr->record.common->keys.lun;
+		channel = sdr->record.common->keys.channel;
 		break;
-
 	default:
 		lprintf(LOG_ERR, "Unknown sensor type for id '%s'", id);
 		return -1;
@@ -348,42 +340,48 @@ ipmi_event_fromsensor(struct ipmi_intf * intf, char * id, char * state, char * e
 			 (emsg.event_dir == EVENT_DIR_DEASSERT && hilo == 1))
 			emsg.event_data[0] = (uint8_t)(str2val(state, ipmi_event_thresh_lo) & 0xf);
 		else {
-			lprintf(LOG_ERR, "Invalid Event\n");
+			lprintf(LOG_ERR, "Invalid Event");
 			return -1;
 		}
 
 		rsp = ipmi_sdr_get_sensor_thresholds(intf, emsg.sensor_num,
-							target, lun);
-
-		if (rsp != NULL && rsp->ccode == 0) {
-
-			/* threshold reading */
-			emsg.event_data[2] = rsp->data[(emsg.event_data[0] / 2) + 1];
-
-			rsp = ipmi_sdr_get_sensor_hysteresis(intf, emsg.sensor_num,
-								target, lun);
-			if (rsp != NULL && rsp->ccode == 0)
-				off = dir ? rsp->data[0] : rsp->data[1];
-			if (off <= 0)
-				off = 1;
-
-			/* trigger reading */
-			if (dir) {
-				if ((emsg.event_data[2] + off) > 0xff)
-					emsg.event_data[1] = 0xff;
-				else
-					emsg.event_data[1] = emsg.event_data[2] + off;
-			}
-			else {
-				if ((emsg.event_data[2] - off) < 0)
-					emsg.event_data[1] = 0;
-				else
-					emsg.event_data[1] = emsg.event_data[2] - off;
-			}
-
-			/* trigger in byte 2, threshold in byte 3 */
-			emsg.event_data[0] |= 0x50;
+							target, lun, channel);
+		if (rsp == NULL) {
+			lprintf(LOG_ERR,
+					"Command Get Sensor Thresholds failed: invalid response.");
+			return (-1);
+		} else if (rsp->ccode != 0) {
+			lprintf(LOG_ERR, "Command Get Sensor Thresholds failed: %s",
+					val2str(rsp->ccode, completion_code_vals));
+			return (-1);
 		}
+
+		/* threshold reading */
+		emsg.event_data[2] = rsp->data[(emsg.event_data[0] / 2) + 1];
+
+		rsp = ipmi_sdr_get_sensor_hysteresis(intf, emsg.sensor_num,
+							target, lun, channel);
+		if (rsp != NULL && rsp->ccode == 0)
+			off = dir ? rsp->data[0] : rsp->data[1];
+		if (off <= 0)
+			off = 1;
+
+		/* trigger reading */
+		if (dir) {
+			if ((emsg.event_data[2] + off) > 0xff)
+				emsg.event_data[1] = 0xff;
+			else
+				emsg.event_data[1] = emsg.event_data[2] + off;
+		}
+		else {
+			if ((emsg.event_data[2] - off) < 0)
+				emsg.event_data[1] = 0;
+			else
+				emsg.event_data[1] = emsg.event_data[2] - off;
+		}
+
+		/* trigger in byte 2, threshold in byte 3 */
+		emsg.event_data[0] |= 0x50;
 	}
 	break;
 
@@ -509,7 +507,7 @@ ipmi_event_fromfile(struct ipmi_intf * intf, char * file)
 	chmed = ipmi_current_channel_medium(intf);
 	if (chmed == IPMI_CHANNEL_MEDIUM_SYSTEM) {
 		/* system interface, need extra generator ID */
-		rqdata[0] = 0x20;
+		rqdata[0] = 0x41;   // As per Fig. 29-2 and Table 5-4
 		req.msg.data_len = 8;
 	}
 

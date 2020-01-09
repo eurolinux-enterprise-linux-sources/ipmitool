@@ -8,6 +8,11 @@
 
 #include <ipmitool/ipmi.h>
 
+/* PICMG version */
+#define PICMG_CPCI_MAJOR_VERSION                   1
+#define PICMG_ATCA_MAJOR_VERSION                   2
+#define PICMG_AMC_MAJOR_VERSION                    4
+
 /* PICMG commands */
 #define PICMG_GET_PICMG_PROPERTIES_CMD             0x00
 #define PICMG_GET_ADDRESS_INFO_CMD                 0x01
@@ -53,11 +58,38 @@
 #define PICMG_PMC                                  0x08
 #define PICMG_RTM                                  0x09
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct picmg_set_fru_activation_cmd {
    unsigned char  picmg_id;      /* always 0*/
    unsigned char  fru_id;        /* threshold setting mask */
    unsigned char  fru_state;     /* fru activation/deactivation */
-} __attribute__ ((packed));
+} ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
+
+typedef enum picmg_busres_board_cmd_types {
+	PICMG_BUSRES_BOARD_CMD_QUERY =0,
+	PICMG_BUSRES_BOARD_CMD_RELEASE,
+	PICMG_BUSRES_BOARD_CMD_FORCE,
+	PICMG_BUSRES_BOARD_CMD_BUS_FREE
+} t_picmg_busres_board_cmd_types ;
+
+typedef enum picmg_busres_shmc_cmd_types {
+	PICMG_BUSRES_SHMC_CMD_REQUEST =0,
+	PICMG_BUSRES_SHMC_CMD_RELINQUISH,
+	PICMG_BUSRES_SHMC_CMD_NOTIFY
+} t_picmg_busres_shmc_cmd_types ;
+
+typedef enum picmg_busres_resource_id {
+	PICMG_BUSRES_METAL_TEST_BUS_1=0,
+	PICMG_BUSRES_METAL_TEST_BUS_2,
+	PICMG_BUSRES_SYNC_CLOCK_GROUP_1,
+	PICMG_BUSRES_SYNC_CLOCK_GROUP_2,
+	PICMG_BUSRES_SYNC_CLOCK_GROUP_3
+} t_picmg_busres_resource_id;
 
 /* the LED color capabilities */
 static const char* led_color_str[] __attribute__((unused)) = {
@@ -173,5 +205,7 @@ struct sAmcPortState {
 
 
 int ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv);
+uint8_t picmg_discover(struct ipmi_intf *intf);
+uint8_t ipmi_picmg_ipmb_address(struct ipmi_intf *intf);
 
 #endif

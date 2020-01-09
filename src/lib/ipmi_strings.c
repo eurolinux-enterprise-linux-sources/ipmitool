@@ -67,6 +67,7 @@ const struct valstr ipmi_oem_info[] = {
    { IPMI_OEM_NOKIA_SIEMENS_NETWORKS, "Nokia Siemens Networks" },
    { IPMI_OEM_BULL,                   "Bull Company" },
    { IPMI_OEM_PPS,                    "Pigeon Point Systems" },
+   { IPMI_OEM_BROADCOM,               "Broadcom Corporation" },
    { 0xffff , NULL },
 };
 
@@ -94,8 +95,10 @@ const struct oemvalstr ipmi_oem_product_info[] = {
    { IPMI_OEM_KONTRON,5504, "AM4300 AdvancedMC" },
    { IPMI_OEM_KONTRON,5507, "AM4301 AdvancedMC" },
    { IPMI_OEM_KONTRON,5508, "AM4330 AdvancedMC" },
+   { IPMI_OEM_KONTRON,5520, "KTC5520/EATX" },
    { IPMI_OEM_KONTRON,5703, "RTM8020" },
    { IPMI_OEM_KONTRON,5704, "RTM8030" },
+   { IPMI_OEM_KONTRON,5705, "RTM8050" },
    { IPMI_OEM_KONTRON,6000, "CP6000" },
    { IPMI_OEM_KONTRON,6006, "DT-64" },
    { IPMI_OEM_KONTRON,6010, "CP6010" },
@@ -107,10 +110,13 @@ const struct oemvalstr ipmi_oem_product_info[] = {
    { IPMI_OEM_KONTRON,5004, "AT8020" },
    { IPMI_OEM_KONTRON,5006, "AT8030 IPMC" },
    { IPMI_OEM_KONTRON,2025, "AT8030 MMC" },
+   { IPMI_OEM_KONTRON,5007, "AT8050" },
    { IPMI_OEM_KONTRON,5301, "AT8400" },
    { IPMI_OEM_KONTRON,5303, "AT8901" },
+   /* Broadcom */
+   { IPMI_OEM_BROADCOM, 5725, "BCM5725" },
 
-   { 0xffff        , 0xffff , NULL },
+   { 0xffffff        , 0xffff , NULL },
  };
 
 const struct oemvalstr ipmi_oem_sdr_type_vals[] = {
@@ -123,11 +129,24 @@ const struct oemvalstr ipmi_oem_sdr_type_vals[] = {
    { IPMI_OEM_KONTRON , 0xC6 , "OEM POST Value Sensor" },
    { IPMI_OEM_KONTRON , 0xC7 , "OEM FWUM Status" },
    { IPMI_OEM_KONTRON , 0xC8 , "OEM Switch Mngt Software Status" },
+   { IPMI_OEM_KONTRON , 0xC9 , "OEM OEM Diagnostic Status" },
+   { IPMI_OEM_KONTRON , 0xCA , "OEM Component Firmware Upgrade" },
+   { IPMI_OEM_KONTRON , 0xCB , "OEM FRU Over Current" },
+   { IPMI_OEM_KONTRON , 0xCC , "OEM FRU Sensor Error" },
+   { IPMI_OEM_KONTRON , 0xCD , "OEM FRU Power Denied" },
+   { IPMI_OEM_KONTRON , 0xCE , "OEM Reserved" },
+   { IPMI_OEM_KONTRON , 0xCF , "OEM Board Reset" },
+   { IPMI_OEM_KONTRON , 0xD0 , "OEM Clock Resource Control" },
+   { IPMI_OEM_KONTRON , 0xD1 , "OEM Power State" },
+   { IPMI_OEM_KONTRON , 0xD2 , "OEM FRU Mngt Power Failure" },
+   { IPMI_OEM_KONTRON , 0xD3 , "OEM Jumper Status" },
+   { IPMI_OEM_KONTRON , 0xF2 , "OEM RTM Module Hotswap" },
 
    { IPMI_OEM_PICMG   , 0xF0 , "PICMG FRU Hotswap" },
    { IPMI_OEM_PICMG   , 0xF1 , "PICMG IPMB0 Link State" },
+   { IPMI_OEM_PICMG   , 0xF2 , "PICMG Module Hotswap" },
 
-   { 0xffff,            0x00,  NULL }
+   { 0xffffff,            0x00,  NULL }
 };
 
 const struct valstr ipmi_netfn_vals[] = {
@@ -188,6 +207,7 @@ const struct valstr ipmi_authtype_session_vals[] = {
 	{ IPMI_SESSION_AUTHTYPE_MD5,      "MD5" },
 	{ IPMI_SESSION_AUTHTYPE_PASSWORD, "PASSWORD" },
 	{ IPMI_SESSION_AUTHTYPE_OEM,      "OEM" },
+	{ IPMI_SESSION_AUTHTYPE_RMCP_PLUS,"RMCP+" },
 	{ 0xFF,                           NULL },
 };
 
@@ -243,26 +263,40 @@ const struct valstr entity_id_vals[] = {
 	{ 0x26, "Remote Management Device" },
 	{ 0x27, "External Environment" },
 	{ 0x28, "Battery" },
-   { 0x29, "Processing Blade" },
-   { 0x2A, "Connectivity Switch" },
-   { 0x2B, "Processor/Memory Module" },
-   { 0x2C, "I/O Module" },
-   { 0x2D, "Processor/IO Module" },
-   { 0x2E, "Management Controller Firmware" },
-   { 0x2F, "IPMI Channel" },
-   { 0x30, "PCI Bus" },
-   { 0x31, "PCI Express Bus" },
-   { 0x32, "SCSI Bus (parallel)" },
-   { 0x33, "SATA/SAS Bus" },
-   { 0x34, "Processor/Front-Side Bus" },
-   /* PICMG */
-   { 0xA0, "PICMG Front Board" },
-   { 0xC0, "PICMG Rear Transition Module" },
-   { 0xC1, "PICMG AdvancedMC Module" },
-   { 0xF0, "PICMG Shelf Management Controller" },
-   { 0xF1, "PICMG Filtration Unit" },
-   { 0xF2, "PICMG Shelf FRU Information" },
-   { 0xF3, "PICMG Alarm Panel" },
+	{ 0x29, "Processing Blade" },
+	{ 0x2A, "Connectivity Switch" },
+	{ 0x2B, "Processor/Memory Module" },
+	{ 0x2C, "I/O Module" },
+	{ 0x2D, "Processor/IO Module" },
+	{ 0x2E, "Management Controller Firmware" },
+	{ 0x2F, "IPMI Channel" },
+	{ 0x30, "PCI Bus" },
+	{ 0x31, "PCI Express Bus" },
+	{ 0x32, "SCSI Bus (parallel)" },
+	{ 0x33, "SATA/SAS Bus" },
+	{ 0x34, "Processor/Front-Side Bus" },
+	{ 0x35, "Real Time Clock(RTC)" },
+	{ 0x36, "Reserved" },
+	{ 0x37, "Air Inlet" },
+	{ 0x38, "Reserved" },
+	{ 0x39, "Reserved" },
+	{ 0x3A, "Reserved" },
+	{ 0x3B, "Reserved" },
+	{ 0x3C, "Reserved" },
+	{ 0x3D, "Reserved" },
+	{ 0x3E, "Reserved" },
+	{ 0x3F, "Reserved" },
+	{ 0x40, "Air Inlet" },
+	{ 0x41, "Processor" },
+	{ 0x42, "Baseboard/Main System Board" },
+	/* PICMG */
+	{ 0xA0, "PICMG Front Board" },
+	{ 0xC0, "PICMG Rear Transition Module" },
+	{ 0xC1, "PICMG AdvancedMC Module" },
+	{ 0xF0, "PICMG Shelf Management Controller" },
+	{ 0xF1, "PICMG Filtration Unit" },
+	{ 0xF2, "PICMG Shelf FRU Information" },
+	{ 0xF3, "PICMG Alarm Panel" },
 	{ 0x00, NULL },
 };
 
@@ -371,6 +405,7 @@ const struct valstr completion_code_vals[] = {
 	{ 0xd3, "Destination unavailable" },
 	{ 0xd4, "Insufficient privilege level" },
 	{ 0xd5, "Command not supported in present state" },
+	{ 0xd6, "Cannot execute command, command disabled" },
 	{ 0xff, "Unspecified error" },
 	{ 0x00, NULL }
 };
@@ -406,4 +441,138 @@ const struct valstr ipmi_encryption_algorithms[] = {
 	{ IPMI_CRYPT_XRC4_128,    "xrc4_128"    },
 	{ IPMI_CRYPT_XRC4_40,     "xrc4_40"     },
 	{ 0x00, NULL }
+};
+
+const struct valstr picmg_frucontrol_vals[] = {
+	{ 0, "Cold Reset" },
+	{ 1, "Warm Reset"  },
+	{ 2, "Graceful Reboot" },
+	{ 3, "Issue Diagnostic Interrupt" },
+	{ 4, "Quiesce" },
+	{ 5, NULL },
+};
+
+const struct valstr picmg_clk_family_vals[] = {
+	{ 0x00, "Unspecified" },
+	{ 0x01, "SONET/SDH/PDH" },
+	{ 0x02, "Reserved for PCI Express" },
+	{ 0x03, "Reserved" }, /* from 03h to C8h */
+	{ 0xC9, "Vendor defined clock family" }, /* from C9h to FFh */
+	{ 0x00, NULL },
+};
+
+const struct oemvalstr picmg_clk_accuracy_vals[] = {
+	{ 0x01, 10, "PRS" },
+	{ 0x01, 20, "STU" },
+	{ 0x01, 30, "ST2" },
+	{ 0x01, 40, "TNC" },
+	{ 0x01, 50, "ST3E" },
+	{ 0x01, 60, "ST3" },
+	{ 0x01, 70, "SMC" },
+	{ 0x01, 80, "ST4" },
+	{ 0x01, 90, "DUS" },
+   { 0x02, 0xE0, "PCI Express Generation 2" },
+   { 0x02, 0xF0, "PCI Express Generation 1" },
+   { 0xffffff, 0x00,  NULL }
+};
+
+const struct oemvalstr picmg_clk_resource_vals[] = {
+	{ 0x0, 0, "On-Carrier Device 0" },
+	{ 0x0, 1, "On-Carrier Device 1" },
+	{ 0x1, 1, "AMC Site 1 - A1" },
+	{ 0x1, 2, "AMC Site 1 - A2" },
+	{ 0x1, 3, "AMC Site 1 - A3" },
+	{ 0x1, 4, "AMC Site 1 - A4" },
+	{ 0x1, 5, "AMC Site 1 - B1" },
+	{ 0x1, 6, "AMC Site 1 - B2" },
+	{ 0x1, 7, "AMC Site 1 - B3" },
+	{ 0x1, 8, "AMC Site 1 - B4" },
+   { 0x2, 0, "ATCA Backplane" },
+   { 0xffffff, 0x00,  NULL }
+};
+
+const struct oemvalstr picmg_clk_id_vals[] = {
+	{ 0x0, 0, "Clock 0" },
+	{ 0x0, 1, "Clock 1" },
+	{ 0x0, 2, "Clock 2" },
+	{ 0x0, 3, "Clock 3" },
+	{ 0x0, 4, "Clock 4" },
+	{ 0x0, 5, "Clock 5" },
+	{ 0x0, 6, "Clock 6" },
+	{ 0x0, 7, "Clock 7" },
+	{ 0x0, 8, "Clock 8" },
+	{ 0x0, 9, "Clock 9" },
+	{ 0x0, 10, "Clock 10" },
+	{ 0x0, 11, "Clock 11" },
+	{ 0x0, 12, "Clock 12" },
+	{ 0x0, 13, "Clock 13" },
+	{ 0x0, 14, "Clock 14" },
+	{ 0x0, 15, "Clock 15" },
+	{ 0x1, 1, "TCLKA" },
+	{ 0x1, 2, "TCLKB" },
+	{ 0x1, 3, "TCLKC" },
+	{ 0x1, 4, "TCLKD" },
+	{ 0x1, 5, "FLCKA" },
+   { 0x2, 1, "CLK1A" },
+   { 0x2, 2, "CLK1A" },
+   { 0x2, 3, "CLK1A" },
+   { 0x2, 4, "CLK1A" },
+   { 0x2, 5, "CLK1A" },
+   { 0x2, 6, "CLK1A" },
+   { 0x2, 7, "CLK1A" },
+   { 0x2, 8, "CLK1A" },
+   { 0x2, 9, "CLK1A" },
+   { 0xffffff, 0x00,  NULL }
+};
+
+const struct valstr picmg_busres_id_vals[] = {
+   { 0x0, "Metallic Test Bus pair #1" },
+   { 0x1, "Metallic Test Bus pair #2" },
+   { 0x2, "Synch clock group 1 (CLK1)" },
+   { 0x3, "Synch clock group 2 (CLK2)" },
+   { 0x4, "Synch clock group 3 (CLK3)" },
+	{ 0x5, NULL }
+};
+const struct valstr picmg_busres_board_cmd_vals[] = {
+  { 0x0, "Query" },
+  { 0x1, "Release" },
+  { 0x2, "Force" },
+  { 0x3, "Bus Free" },
+  { 0x4, NULL }
+};
+
+const struct valstr picmg_busres_shmc_cmd_vals[] = {
+  { 0x0, "Request" },
+  { 0x1, "Relinquish" },
+  { 0x2, "Notify" },
+  { 0x3, NULL }
+};
+
+const struct oemvalstr picmg_busres_board_status_vals[] = {
+ { 0x0, 0x0, "In control" },
+ { 0x0, 0x1, "No control" },
+ { 0x1, 0x0, "Ack" },
+ { 0x1, 0x1, "Refused" },
+ { 0x1, 0x2, "No control" },
+ { 0x2, 0x0, "Ack" },
+ { 0x2, 0x1, "No control" },
+ { 0x3, 0x0, "Accept" },
+ { 0x3, 0x1, "Not Needed" },
+ { 0xffffff, 0x00,  NULL }
+};
+
+const struct oemvalstr picmg_busres_shmc_status_vals[] = {
+ { 0x0, 0x0, "Grant" },
+ { 0x0, 0x1, "Busy" },
+ { 0x0, 0x2, "Defer" },
+ { 0x0, 0x3, "Deny" },
+
+ { 0x1, 0x0, "Ack" },
+ { 0x1, 0x1, "Error" },
+
+ { 0x2, 0x0, "Ack" },
+ { 0x2, 0x1, "Error" },
+ { 0x2, 0x2, "Deny" },
+
+ { 0xffffff, 0x00,  NULL }
 };

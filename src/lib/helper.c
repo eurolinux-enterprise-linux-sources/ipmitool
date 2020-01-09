@@ -35,6 +35,7 @@
 #include <sys/ioctl.h>  /* For TIOCNOTTY */
 
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <inttypes.h>
 #include <signal.h>
@@ -43,6 +44,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <assert.h>
 
 #if HAVE_CONFIG_H
 # include <config.h>
@@ -73,13 +75,13 @@ uint16_t buf2short(uint8_t * buf)
 
 const char * buf2str(uint8_t * buf, int len)
 {
-	static char str[1024];
+	static char str[2049];
 	int i;
 
 	if (len <= 0 || len > 1024)
 		return NULL;
 
-	memset(str, 0, 1024);
+	memset(str, 0, 2049);
 
 	for (i=0; i<len; i++)
 		sprintf(str+i+i, "%2.2x", buf[i]);
@@ -99,13 +101,13 @@ void printbuf(const uint8_t * buf, int len, const char * desc)
 	if (verbose < 1)
 		return;
 
-	fprintf(stderr, "%s (%d bytes)\r\n", desc, len);
+	fprintf(stderr, "%s (%d bytes)\n", desc, len);
 	for (i=0; i<len; i++) {
 		if (((i%16) == 0) && (i != 0))
-			fprintf(stderr, "\r\n");
+			fprintf(stderr, "\n");
 		fprintf(stderr, " %2.2x", buf[i]);
 	}
-	fprintf(stderr, "\r\n");
+	fprintf(stderr, "\n");
 }
 
 const char * val2str(uint16_t val, const struct valstr *vs)
@@ -123,28 +125,19 @@ const char * val2str(uint16_t val, const struct valstr *vs)
 
 	return un_str;
 }
- 
+
 const char * oemval2str(uint32_t oem, uint16_t val,
                                              const struct oemvalstr *vs)
 {
 	static char un_str[32];
 	int i;
 
-	for (i = 0; vs[i].oem != 0x00 &&  vs[i].str != NULL; i++) {
-      /* FIXME: for now on we assume PICMG capability on all IANAs */
-      if
-      ( 
-         (
-            vs[i].oem == oem 
-            ||
-            vs[i].oem == IPMI_OEM_PICMG 
-         )
-         &&  
-         vs[i].val == val  
-      )
-      {
-         return vs[i].str;
-      }
+	for (i = 0; vs[i].oem != 0xffffff &&  vs[i].str != NULL; i++) {
+		/* FIXME: for now on we assume PICMG capability on all IANAs */
+		if ( (vs[i].oem == oem || vs[i].oem == IPMI_OEM_PICMG) &&
+				vs[i].val == val ) {
+			return vs[i].str;
+		}
 	}
 
 	memset(un_str, 0, 32);
@@ -152,6 +145,248 @@ const char * oemval2str(uint32_t oem, uint16_t val,
 
 	return un_str;
 }
+
+/* str2double - safely convert string to double
+ *
+ * @str: source string to convert from
+ * @double_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
+ */
+int str2double(const char * str, double * double_ptr)
+{
+	char * end_ptr = 0;
+	if (!str || !double_ptr)
+		return (-1);
+
+	*double_ptr = 0;
+	errno = 0;
+	*double_ptr = strtod(str, &end_ptr);
+
+	if (*end_ptr != '\0')
+		return (-2);
+
+	if (errno != 0)
+		return (-3);
+
+	return 0;
+} /* str2double(...) */
+
+/* str2long - safely convert string to int64_t
+ *
+ * @str: source string to convert from
+ * @lng_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
+ */
+int str2long(const char * str, int64_t * lng_ptr)
+{
+	char * end_ptr = 0;
+	if (!str || !lng_ptr)
+		return (-1);
+
+	*lng_ptr = 0;
+	errno = 0;
+	*lng_ptr = strtol(str, &end_ptr, 0);
+
+	if (*end_ptr != '\0')
+		return (-2);
+
+	if (errno != 0)
+		return (-3);
+
+	return 0;
+} /* str2long(...) */
+
+/* str2ulong - safely convert string to uint64_t
+ *
+ * @str: source string to convert from
+ * @ulng_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
+ */
+int str2ulong(const char * str, uint64_t * ulng_ptr)
+{
+	char * end_ptr = 0;
+	if (!str || !ulng_ptr)
+		return (-1);
+
+	*ulng_ptr = 0;
+	errno = 0;
+	*ulng_ptr = strtoul(str, &end_ptr, 0);
+
+	if (*end_ptr != '\0')
+		return (-2);
+
+	if (errno != 0)
+		return (-3);
+
+	return 0;
+} /* str2ulong(...) */
+
+/* str2int - safely convert string to int32_t
+ *
+ * @str: source string to convert from
+ * @int_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
+ */
+int str2int(const char * str, int32_t * int_ptr)
+{
+	int rc = 0;
+	int64_t arg_long = 0;
+	if (!str || !int_ptr)
+		return (-1);
+
+	if ( (rc = str2long(str, &arg_long)) != 0 ) {
+		*int_ptr = 0;
+		return rc;
+	}
+
+	if (arg_long < INT32_MIN || arg_long > INT32_MAX)
+		return (-3);
+
+	*int_ptr = (int32_t)arg_long;
+	return 0;
+} /* str2int(...) */
+
+/* str2uint - safely convert string to uint32_t
+ *
+ * @str: source string to convert from
+ * @uint_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
+ */
+int str2uint(const char * str, uint32_t * uint_ptr)
+{
+	int rc = 0;
+	uint64_t arg_ulong = 0;
+	if (!str || !uint_ptr)
+		return (-1);
+
+	if ( (rc = str2ulong(str, &arg_ulong)) != 0) {
+		*uint_ptr = 0;
+		return rc;
+	}
+
+	if (arg_ulong > UINT32_MAX)
+		return (-3);
+
+	*uint_ptr = (uint32_t)arg_ulong;
+	return 0;
+} /* str2uint(...) */
+
+/* str2short - safely convert string to int16_t
+ *
+ * @str: source string to convert from
+ * @shrt_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
+ */
+int str2short(const char * str, int16_t * shrt_ptr)
+{
+	int rc = (-3);
+	int64_t arg_long = 0;
+	if (!str || !shrt_ptr)
+		return (-1);
+
+	if ( (rc = str2long(str, &arg_long)) != 0 ) {
+		*shrt_ptr = 0;
+		return rc;
+	}
+
+	if (arg_long < INT16_MIN || arg_long > INT16_MAX)
+		return (-3);
+
+	*shrt_ptr = (int16_t)arg_long;
+	return 0;
+} /* str2short(...) */
+
+/* str2ushort - safely convert string to uint16_t
+ *
+ * @str: source string to convert from
+ * @ushrt_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
+ */
+int str2ushort(const char * str, uint16_t * ushrt_ptr)
+{
+	int rc = (-3);
+	uint64_t arg_ulong = 0;
+	if (!str || !ushrt_ptr)
+		return (-1);
+
+	if ( (rc = str2ulong(str, &arg_ulong)) != 0 ) {
+		*ushrt_ptr = 0;
+		return rc;
+	}
+
+	if (arg_ulong > UINT16_MAX)
+		return (-3);
+
+	*ushrt_ptr = (uint16_t)arg_ulong;
+	return 0;
+} /* str2ushort(...) */
+
+/* str2char - safely convert string to int8
+ *
+ * @str: source string to convert from
+ * @chr_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) if one of args is NULL, (-2) or (-3) if conversion fails
+ */
+int str2char(const char *str, int8_t * chr_ptr)
+{
+	int rc = (-3);
+	int64_t arg_long = 0;
+	if (!str || !chr_ptr) {
+		return (-1);
+	}
+	if ((rc = str2long(str, &arg_long)) != 0) {
+		*chr_ptr = 0;
+		return rc;
+	}
+	if (arg_long < INT8_MIN || arg_long > INT8_MAX) {
+		return (-3);
+	}
+	*chr_ptr = (uint8_t)arg_long;
+	return 0;
+} /* str2char(...) */
+
+/* str2uchar - safely convert string to uint8
+ *
+ * @str: source string to convert from
+ * @uchr_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) if one of args is NULL, (-2) or (-3) if conversion fails
+ */
+int str2uchar(const char * str, uint8_t * uchr_ptr)
+{
+	int rc = (-3);
+	uint64_t arg_ulong = 0;
+	if (!str || !uchr_ptr)
+		return (-1);
+
+	if ( (rc = str2ulong(str, &arg_ulong)) != 0 ) {
+		*uchr_ptr = 0;
+		return rc;
+	}
+
+	if (arg_ulong > UINT8_MAX)
+		return (-3);
+
+	*uchr_ptr = (uint8_t)arg_ulong;
+	return 0;
+} /* str2uchar(...) */
 
 uint16_t str2val(const char *str, const struct valstr *vs)
 {
@@ -383,10 +618,6 @@ ipmi_start_daemon(struct ipmi_intf *intf)
 	sigset_t sighup;
 #endif
 
-	/* if we are started from init no need to become daemon */
-	if (getppid() == 1)
-		return;
-
 #ifdef SIGHUP
 	sigemptyset(&sighup);
 	sigaddset(&sighup, SIGHUP);
@@ -410,7 +641,7 @@ ipmi_start_daemon(struct ipmi_intf *intf)
 	pid = (pid_t) fork();
 	if (pid < 0 || pid > 0)
 		exit(0);
-	
+
 #if defined(SIGTSTP) && defined(TIOCNOTTY)
 	if (setpgid(0, getpid()) == -1)
 		exit(1);
@@ -434,7 +665,126 @@ ipmi_start_daemon(struct ipmi_intf *intf)
 			close(fd);
 	}
 
-	open("/dev/null", O_RDWR);
-	dup(0);
-	dup(0);
+	fd = open("/dev/null", O_RDWR);
+	assert(0 == fd);
+	dup(fd);
+	dup(fd);
+}
+
+/* is_fru_id - wrapper for str-2-int FRU ID conversion. Message is printed
+ * on error.
+ * FRU ID range: <0..255>
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @fru_id_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) on error and message is printed on STDERR
+ */
+int
+is_fru_id(const char *argv_ptr, uint8_t *fru_id_ptr)
+{
+	if (!argv_ptr || !fru_id_ptr) {
+		lprintf(LOG_ERR, "is_fru_id(): invalid argument(s).");
+		return (-1);
+	}
+
+	if (str2uchar(argv_ptr, fru_id_ptr) == 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "FRU ID '%s' is either invalid or out of range.",
+			argv_ptr);
+	return (-1);
+} /* is_fru_id(...) */
+
+/* is_ipmi_channel_num - wrapper for str-2-int Channel conversion. Message is
+ * printed on error.
+ *
+ * 6.3 Channel Numbers, p. 45, IPMIv2 spec.
+ * Valid channel numbers are: <0..7>, <E-F>
+ * Reserved channel numbers: <8-D>
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @channel_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) on error and message is printed on STDERR
+ */
+int
+is_ipmi_channel_num(const char *argv_ptr, uint8_t *channel_ptr)
+{
+	if (!argv_ptr || !channel_ptr) {
+		lprintf(LOG_ERR,
+				"is_ipmi_channel_num(): invalid argument(s).");
+		return (-1);
+	}
+	if ((str2uchar(argv_ptr, channel_ptr) == 0)
+			&& ((*channel_ptr >= 0x0 && *channel_ptr <= 0x7)
+				|| (*channel_ptr >= 0xE && *channel_ptr <= 0xF))) {
+		return 0;
+	}
+	lprintf(LOG_ERR,
+			"Given Channel number '%s' is either invalid or out of range.",
+			argv_ptr);
+	lprintf(LOG_ERR, "Channel number must be from ranges: <0..7>, <0xE..0xF>");
+	return (-1);
+}
+
+/* is_ipmi_user_id() - wrapper for str-2-uint IPMI UID conversion. Message is
+ * printed on error.
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @ipmi_uid_ptr: pointer where to store result
+ *
+ * returns zero on success
+ * returns (-1) on error and message is printed on STDERR
+ */
+int
+is_ipmi_user_id(const char *argv_ptr, uint8_t *ipmi_uid_ptr)
+{
+	if (!argv_ptr || !ipmi_uid_ptr) {
+		lprintf(LOG_ERR,
+				"is_ipmi_user_id(): invalid argument(s).");
+		return (-1);
+	}
+	if ((str2uchar(argv_ptr, ipmi_uid_ptr) == 0)
+			&& *ipmi_uid_ptr >= IPMI_UID_MIN
+			&& *ipmi_uid_ptr <= IPMI_UID_MAX) {
+		return 0;
+	}
+	lprintf(LOG_ERR,
+			"Given User ID '%s' is either invalid or out of range.",
+			argv_ptr);
+	lprintf(LOG_ERR, "User ID is limited to range <%i..%i>.",
+			IPMI_UID_MIN, IPMI_UID_MAX);
+	return (-1);
+}
+
+uint16_t
+ipmi_get_oem_id(struct ipmi_intf *intf)
+{
+	/* Execute a Get Board ID command to determine the board */
+	struct ipmi_rs *rsp;
+	struct ipmi_rq req;
+	uint16_t oem_id;
+
+	memset(&req, 0, sizeof(req));
+	req.msg.netfn = IPMI_NETFN_TSOL;
+	req.msg.cmd   = 0x21;
+	req.msg.data_len = 0;
+
+	rsp = intf->sendrecv(intf, &req);
+	if (rsp == NULL) {
+		lprintf(LOG_ERR, "Get Board ID command failed");
+		return 0;
+	}
+	if (rsp->ccode > 0) {
+		lprintf(LOG_ERR, "Get Board ID command failed: %#x %s",
+			rsp->ccode, val2str(rsp->ccode, completion_code_vals));
+		return 0;
+	}
+	oem_id = rsp->data[0] | (rsp->data[1] << 8);
+	lprintf(LOG_DEBUG,"Board ID: %x", oem_id);
+
+	return oem_id;
 }

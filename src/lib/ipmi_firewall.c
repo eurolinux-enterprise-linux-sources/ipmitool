@@ -47,14 +47,53 @@
 static void
 printf_firewall_usage(void)
 {
-	printf("Firmware Firewall Commands:\n");
-	printf("\tinfo [channel H] [lun L]\n");
-	printf("\tinfo [channel H] [lun L [netfn N [command C [subfn S]]]]\n");
-	printf("\tenable [channel H] [lun L [netfn N [command C [subfn S]]]]\n");
-	printf("\tdisable [channel H] [lun L [netfn N [command C [subfn S]]]] [force])\n");
-	printf("\treset [channel H] \n");
-	printf("\t\twhere H is a Channel, L is a LUN, N is a NetFn,\n");
-	printf("\t\tC is a Command and S is a Sub-Function\n");
+	lprintf(LOG_NOTICE,
+"Firmware Firewall Commands:");
+	lprintf(LOG_NOTICE,
+"\tinfo [channel H] [lun L]");
+	lprintf(LOG_NOTICE,
+"\tinfo [channel H] [lun L [netfn N [command C [subfn S]]]]");
+	lprintf(LOG_NOTICE,
+"\tenable [channel H] [lun L [netfn N [command C [subfn S]]]]");
+	lprintf(LOG_NOTICE,
+"\tdisable [channel H] [lun L [netfn N [command C [subfn S]]]] [force])");
+	lprintf(LOG_NOTICE,
+"\treset [channel H]");
+	lprintf(LOG_NOTICE,
+"\t\twhere H is a Channel, L is a LUN, N is a NetFn,");
+	lprintf(LOG_NOTICE,
+"\t\tC is a Command and S is a Sub-Function");
+}
+
+void
+printf_firewall_info_usage(void)
+{
+	lprintf(LOG_NOTICE,
+"info [channel H]");
+	lprintf(LOG_NOTICE,
+"\tList all of the firewall information for all LUNs, NetFns");
+	lprintf(LOG_NOTICE,
+"\tand Commands, This is a long list and is not very human readable.");
+	lprintf(LOG_NOTICE,
+"info [channel H] lun L");
+	lprintf(LOG_NOTICE,
+"\tThis also prints a long list that is not very human readable.");
+	lprintf(LOG_NOTICE,
+"info [channel H] lun L netfn N");
+	lprintf(LOG_NOTICE,
+"\tThis prints out information for a single LUN/NetFn pair.");
+	lprintf(LOG_NOTICE,
+"\tThat is not really very usable, but at least it is short.");
+	lprintf(LOG_NOTICE,
+"info [channel H] lun L netfn N command C");
+	lprintf(LOG_NOTICE,
+"\tThis is the one you want -- it prints out detailed human");
+	lprintf(LOG_NOTICE,
+"\treadable information.  It shows the support, configurable, and");
+	lprintf(LOG_NOTICE,
+"\tenabled bits for the Command C on LUN/NetFn pair L,N and the");
+	lprintf(LOG_NOTICE,
+"\tsame information about each of its Sub-functions.");
 }
 
 // print n bytes of bit field bf (if invert, print ~bf)
@@ -82,62 +121,83 @@ static int
 ipmi_firewall_parse_args(int argc, char ** argv, struct ipmi_function_params * p)
 {
 	int i;
+	uint8_t conv_err = 0;
 
 	if (!p) {
 		lprintf(LOG_ERR, "ipmi_firewall_parse_args: p is NULL");
 		return -1;
 	}
 	for (i=0; i<argc; i++) {
-		if (strncmp(argv[i], "channel", 7) == 0) {
-			if (++i < argc)
-				p->channel = strtol(argv[i], NULL, 0);
+		if (strncmp(argv[i], "channel", 7) == 0 && (++i < argc)) {
+			uint8_t channel_tmp = 0;
+			if (is_ipmi_channel_num(argv[i], &channel_tmp) != 0) {
+				conv_err = 1;
+				break;
+			} else {
+				p->channel = channel_tmp;
+			}
 		}
-		else if (strncmp(argv[i], "lun", 3) == 0) {
-			if (++i < argc)
-				p->lun = strtol(argv[i], NULL, 0);
+		else if (strncmp(argv[i], "lun", 3) == 0 && (++i < argc)) {
+			if (str2int(argv[i], &(p->lun)) != 0) {
+				lprintf(LOG_ERR, "Given lun '%s' is invalid.", argv[i]);
+				conv_err = 1;
+				break;
+			}
 		}
 		else if (strncmp(argv[i], "force", 5) == 0) {
 			p->force = 1;
 		}
-		else if (strncmp(argv[i], "netfn", 5) == 0) {
-			if (++i < argc)
-				p->netfn = strtol(argv[i], NULL, 0);
+		else if (strncmp(argv[i], "netfn", 5) == 0 && (++i < argc)) {
+			if (str2int(argv[i], &(p->netfn)) != 0) {
+				lprintf(LOG_ERR, "Given netfn '%s' is invalid.", argv[i]);
+				conv_err = 1;
+				break;
+			}
 		}
-		else if (strncmp(argv[i], "command", 7) == 0) {
-			if (++i < argc)
-				p->command = strtol(argv[i], NULL, 0);
+		else if (strncmp(argv[i], "command", 7) == 0 && (++i < argc)) {
+			if (str2int(argv[i], &(p->command)) != 0) {
+				lprintf(LOG_ERR, "Given command '%s' is invalid.", argv[i]);
+				conv_err = 1;
+				break;
+			}
 		}
-		else if (strncmp(argv[i], "subfn", 5) == 0) {
-			if (++i < argc)
-				p->subfn = strtol(argv[i], NULL, 0);
+		else if (strncmp(argv[i], "subfn", 5) == 0 && (++i < argc)) {
+			if (str2int(argv[i], &(p->subfn)) != 0) {
+				lprintf(LOG_ERR, "Given subfn '%s' is invalid.", argv[i]);
+				conv_err = 1;
+				break;
+			}
 		}
 	}
+	if (conv_err != 0) {
+		return (-1);
+	}
 	if (p->subfn >= MAX_SUBFN) {
-		printf("subfn is out of range (0-%d)\n", MAX_SUBFN-1);
+		lprintf(LOG_ERR, "subfn is out of range (0-%d)", MAX_SUBFN-1);
 		return -1;
 	}
 	if (p->command >= MAX_COMMAND) {
-		printf("command is out of range (0-%d)\n", MAX_COMMAND-1);
+		lprintf(LOG_ERR, "command is out of range (0-%d)", MAX_COMMAND-1);
 		return -1;
 	}
 	if (p->netfn >= MAX_NETFN) {
-		printf("netfn is out of range (0-%d)\n", MAX_NETFN-1);
+		lprintf(LOG_ERR, "netfn is out of range (0-%d)", MAX_NETFN-1);
 		return -1;
 	}
 	if (p->lun >= MAX_LUN) {
-		printf("lun is out of range (0-%d)\n", MAX_LUN-1);
+		lprintf(LOG_ERR, "lun is out of range (0-%d)", MAX_LUN-1);
 		return -1;
 	}
 	if (p->netfn >= 0 && p->lun < 0) {
-		printf("if netfn is set, lun must be set also\n");
+		lprintf(LOG_ERR, "if netfn is set, so must be lun");
 		return -1;
 	}
 	if (p->command >= 0 && p->netfn < 0) {
-		printf("if command is set, netfn must be set also\n");
+		lprintf(LOG_ERR, "if command is set, so must be netfn");
 		return -1;
 	}
 	if (p->subfn >= 0 && p->command < 0) {
-		printf("if subfn is set, command must be set also\n");
+		lprintf(LOG_ERR, "if subfn is set, so must be command");
 		return -1;
 	}
 	return 0;
@@ -848,19 +908,7 @@ ipmi_firewall_info(struct ipmi_intf * intf, int argc, char ** argv)
 
 	if ((argc > 0 && strncmp(argv[0], "help", 4) == 0) || ipmi_firewall_parse_args(argc, argv, &p) < 0)
 	{
-		printf("info [channel H]\n");
-		printf("\tlist all of the firewall information for all LUNs, NetFns, and Commands\n");
-		printf("\tthis is a long list and is not very human readable\n");
-		printf("info [channel H] lun L\n");
-		printf("\tthis also prints a long list that is not very human readable\n");
-		printf("info [channel H] lun L netfn N\n");
-		printf("\tthis prints out information for a single LUN/NetFn pair\n");
-		printf("\tthat is not really very usable, but at least it is short\n");
-		printf("info [channel H] lun L netfn N command C\n");
-		printf("\tthis is the one you want -- it prints out detailed human\n");
-		printf("\treadable information.  It shows the support, configurable, and\n");
-		printf("\tenabled bits for the Command C on LUN/NetFn pair L,N and the\n");
-		printf("\tsame information about each of its Sub-functions\n");
+		printf_firewall_info_usage();
 		return 0;
 	}
 
@@ -881,6 +929,7 @@ ipmi_firewall_info(struct ipmi_intf * intf, int argc, char ** argv)
 			lprintf(LOG_ERR, "Command 0x%02x not supported on LUN/NetFn pair %02x,%02x",
 				p.command, p.lun, p.netfn);
 			free(bmc_fn_support);
+			bmc_fn_support = NULL;
 			return 0;
 		}
 		cmd =
@@ -908,6 +957,7 @@ ipmi_firewall_info(struct ipmi_intf * intf, int argc, char ** argv)
 			lprintf(LOG_ERR, "LUN or LUN/NetFn pair %02x,%02x not supported",
 				p.lun, p.netfn);
 			free(bmc_fn_support);
+			bmc_fn_support = NULL;
 			return 0;
 		}
 		n = p.netfn >> 1;
@@ -948,6 +998,7 @@ ipmi_firewall_info(struct ipmi_intf * intf, int argc, char ** argv)
 	}
 
 	free(bmc_fn_support);
+	bmc_fn_support = NULL;
 	return ret;
 }
 
@@ -997,6 +1048,7 @@ ipmi_firewall_enable_disable(struct ipmi_intf * intf, int enable, int argc, char
 	ret = _gather_info(intf, &p, bmc_fn_support);
 	if (ret < 0) {
 		free(bmc_fn_support);
+		bmc_fn_support = NULL;
 		return ret;
 	}
 
@@ -1037,6 +1089,7 @@ ipmi_firewall_enable_disable(struct ipmi_intf * intf, int enable, int argc, char
 		*/
 	}
 	free(bmc_fn_support);
+	bmc_fn_support = NULL;
 	return ret;
 }
 
@@ -1073,6 +1126,7 @@ ipmi_firewall_reset(struct ipmi_intf * intf, int argc, char ** argv)
 	ret = _gather_info(intf, &p, bmc_fn_support);
 	if (ret < 0) {
 		free(bmc_fn_support);
+		bmc_fn_support = NULL;
 		return ret;
 	}
 
@@ -1095,6 +1149,7 @@ ipmi_firewall_reset(struct ipmi_intf * intf, int argc, char ** argv)
 	}
 
 	free(bmc_fn_support);
+	bmc_fn_support = NULL;
 	return ret;
 }
 

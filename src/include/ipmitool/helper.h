@@ -50,6 +50,14 @@
 #define tboolean   int
 #endif
 
+/* IPMI spec. - UID 0 reserved, 63 maximum UID which can be used */
+#ifndef IPMI_UID_MIN
+# define IPMI_UID_MIN 1
+#endif
+#ifndef IPMI_UID_MAX
+# define IPMI_UID_MAX 63
+#endif
+
 struct ipmi_intf;
 
 struct valstr {
@@ -57,13 +65,28 @@ struct valstr {
 	const char * str;
 };
 struct oemvalstr {
-	uint16_t oem;
+	uint32_t oem;
    uint16_t val;
 	const char * str;
 };
 
 const char * val2str(uint16_t val, const struct valstr * vs);
 const char * oemval2str(uint32_t oem,uint16_t val, const struct oemvalstr * vs);
+
+int str2double(const char * str, double * double_ptr);
+int str2long(const char * str, int64_t * lng_ptr);
+int str2ulong(const char * str, uint64_t * ulng_ptr);
+int str2int(const char * str, int32_t * int_ptr);
+int str2uint(const char * str, uint32_t * uint_ptr);
+int str2short(const char * str, int16_t * shrt_ptr);
+int str2ushort(const char * str, uint16_t * ushrt_ptr);
+int str2char(const char * str, int8_t * chr_ptr);
+int str2uchar(const char * str, uint8_t * uchr_ptr);
+
+int is_fru_id(const char *argv_ptr, uint8_t *fru_id_ptr);
+int is_ipmi_channel_num(const char *argv_ptr, uint8_t *channel_ptr);
+int is_ipmi_user_id(const char *argv_ptr, uint8_t *ipmi_uid_ptr);
+
 uint16_t str2val(const char * str, const struct valstr * vs);
 void print_valstr(const struct valstr * vs, const char * title, int loglevel);
 void print_valstr_2col(const struct valstr * vs, const char * title, int loglevel);
@@ -76,6 +99,7 @@ void printbuf(const uint8_t * buf, int len, const char * desc);
 uint8_t ipmi_csum(uint8_t * d, int s);
 FILE * ipmi_open_file(const char * file, int rw);
 void ipmi_start_daemon(struct ipmi_intf *intf);
+uint16_t ipmi_get_oem_id(struct ipmi_intf *intf);
 
 #define ipmi_open_file_read(file)	ipmi_open_file(file, 0)
 #define ipmi_open_file_write(file)	ipmi_open_file(file, 1)

@@ -1,21 +1,21 @@
 /*
  * Copyright (c) 2003 Sun Microsystems, Inc.  All Rights Reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
- * 
+ *
  * Redistribution of source code must retain the above copyright
  * notice, this list of conditions and the following disclaimer.
- * 
+ *
  * Redistribution in binary form must reproduce the above copyright
  * notice, this list of conditions and the following disclaimer in the
  * documentation and/or other materials provided with the distribution.
- * 
+ *
  * Neither the name of Sun Microsystems, Inc. or the names of
  * contributors may be used to endorse or promote products derived
  * from this software without specific prior written permission.
- * 
+ *
  * This software is provided "AS IS," without a warranty of any kind.
  * ALL EXPRESS OR IMPLIED CONDITIONS, REPRESENTATIONS AND WARRANTIES,
  * INCLUDING ANY IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A
@@ -48,10 +48,13 @@
 
 int ipmi_mc_main(struct ipmi_intf *, int, char **);
 
-/* 
+/*
  * Response data from IPM Get Device ID Command (IPMI rev 1.5, section 17.1)
- * The following really apply to any IPM device, not just BMCs... 
+ * The following really apply to any IPM device, not just BMCs...
  */
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct ipm_devid_rsp {
 	uint8_t device_id;
 	uint8_t device_revision;
@@ -62,10 +65,13 @@ struct ipm_devid_rsp {
 	uint8_t manufacturer_id[3];
 	uint8_t product_id[2];
 	uint8_t aux_fw_rev[4];
-} __attribute__ ((packed));
+} ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
 #define IPM_DEV_DEVICE_ID_SDR_MASK     (0x80)	/* 1 = provides SDRs      */
-#define IPM_DEV_DEVICE_ID_REV_MASK     (0x07)	/* BCD-enoded             */
+#define IPM_DEV_DEVICE_ID_REV_MASK     (0x0F)	/* BCD-enoded             */
 
 #define IPM_DEV_FWREV1_AVAIL_MASK      (0x80)	/* 0 = normal operation   */
 #define IPM_DEV_FWREV1_MAJOR_MASK      (0x3f)	/* Major rev, BCD-encoded */
@@ -83,10 +89,16 @@ struct ipm_devid_rsp {
 
 #define IPM_DEV_ADTL_SUPPORT_BITS      (8)
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct ipm_selftest_rsp {
 	unsigned char code;
 	unsigned char test;
-} __attribute__ ((packed));
+} ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
 #define IPM_SFT_CODE_OK			0x55
 #define IPM_SFT_CODE_NOT_IMPLEMENTED	0x56
@@ -103,6 +115,9 @@ struct ipm_selftest_rsp {
 #define IPM_SELFTEST_FW_BOOTBLOCK	0x02
 #define IPM_SELFTEST_FW_CORRUPTED	0x01
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct ipm_get_watchdog_rsp {
 	unsigned char timer_use;
 	unsigned char timer_actions;
@@ -112,7 +127,10 @@ struct ipm_get_watchdog_rsp {
 	unsigned char initial_countdown_msb;
 	unsigned char present_countdown_lsb;
 	unsigned char present_countdown_msb;
-} __attribute__ ((packed));
+} ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
 #define IPM_WATCHDOG_RESET_ERROR	0x80
 
@@ -132,5 +150,21 @@ struct ipm_get_watchdog_rsp {
 #define IPM_WATCHDOG_CLEAR_OS_LOAD	0x08
 #define IPM_WATCHDOG_CLEAR_BIOS_POST	0x04
 #define IPM_WATCHDOG_CLEAR_BIOS_FRB2	0x02
+
+/* IPMI 2.0 command for system information*/
+#define IPMI_SET_SYS_INFO                  0x58
+#define IPMI_GET_SYS_INFO                  0x59
+#define IPMI_SYSINFO_SET0_SIZE             14
+#define IPMI_SYSINFO_SETN_SIZE             16
+
+#define IPMI_SYSINFO_HOSTNAME		0x02
+#define IPMI_SYSINFO_PRIMARY_OS_NAME	0x03
+#define IPMI_SYSINFO_OS_NAME		0x04
+#define IPMI_SYSINFO_DELL_OS_VERSION	0xe4
+#define IPMI_SYSINFO_DELL_URL		0xde
+
+int ipmi_mc_getsysinfo(struct ipmi_intf * intf, int param, int block, int set, 
+		    int len, void *buffer);
+int ipmi_mc_setsysinfo(struct ipmi_intf * intf, int len, void *buffer);
 
 #endif				/*IPMI_MC_H */

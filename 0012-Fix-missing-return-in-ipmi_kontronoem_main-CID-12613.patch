@@ -1,0 +1,25 @@
+From 29532793ef9cbe55f13658ba295ad52a4ab5b5ea Mon Sep 17 00:00:00 2001
+From: Zdenek Styblik <stybla@turnovfree.net>
+Date: Tue, 30 Dec 2014 17:20:49 +0100
+Subject: [PATCH] Fix missing return in ipmi_kontronoem_main() - CID#1261317
+
+---
+ lib/ipmi_kontronoem.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/ipmi_kontronoem.c b/lib/ipmi_kontronoem.c
+index 48dc684..6a24831 100644
+--- a/lib/ipmi_kontronoem.c
++++ b/lib/ipmi_kontronoem.c
+@@ -105,7 +105,7 @@ ipmi_kontronoem_main(struct ipmi_intf *intf, int argc, char **argv)
+ 		if (argc < 2) {
+ 			lprintf(LOG_ERR, "Not enough parameters given.");
+ 			ipmi_kontron_nextboot_help();
+-			rc = (-1);
++			return (-1);
+ 		}
+ 		rc = ipmi_kontron_nextboot_set(intf, (argc - 1), (argv + 1));
+ 		if (rc == 0) {
+-- 
+2.5.0
+

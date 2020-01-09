@@ -57,12 +57,18 @@ enum {
 	IPMI_EVENT_CLASS_OEM,
 };
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct sel_get_rq {
 	uint16_t	reserve_id;
 	uint16_t	record_id;
 	uint8_t	offset;
 	uint8_t	length;
-} __attribute__ ((packed));
+} ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
 struct standard_spec_sel_rec{
 	uint32_t	timestamp;
@@ -77,12 +83,32 @@ struct standard_spec_sel_rec{
 	uint8_t	event_type : 7;
 	uint8_t	event_dir  : 1;
 #endif
-#define DATA_BYTE2_SPECIFIED_MASK 0xc0    /* event_data[0] bit mask */
-#define DATA_BYTE3_SPECIFIED_MASK 0x30    /* event_data[0] bit mask */
-#define EVENT_OFFSET_MASK         0x0f    /* event_data[0] bit mask */
+#define DATA_BYTE2_SPECIFIED_MASK	0xc0    /* event_data[0] bit mask */
+#define DATA_BYTE3_SPECIFIED_MASK	0x30    /* event_data[0] bit mask */
+#define EVENT_OFFSET_MASK		0x0f    /* event_data[0] bit mask */
 	uint8_t	event_data[3];
 };
-
+/* Dell Specific MACRO's */
+#define	OEM_CODE_IN_BYTE2		0x80	  /* Dell specific OEM Byte in Byte 2 Mask */
+#define	OEM_CODE_IN_BYTE3		0x20	  /* Dell specific OEM Byte in Byte 3 Mask */
+/* MASK MACROS */
+#define	MASK_LOWER_NIBBLE		0x0F
+#define	MASK_HIGHER_NIBBLE		0xF0
+/*Senosr type Macro's */
+#define	SENSOR_TYPE_MEMORY		0x0C
+#define	SENSOR_TYPE_CRIT_INTR		0x13
+#define	SENSOR_TYPE_EVT_LOG		0x10
+#define	SENSOR_TYPE_SYS_EVENT		0x12
+#define	SENSOR_TYPE_PROCESSOR		0x07
+#define	SENSOR_TYPE_OEM_SEC_EVENT	0xC1
+#define SENSOR_TYPE_VER_CHANGE		0x2B
+#define	SENSOR_TYPE_FRM_PROG		0x0F
+#define	SENSOR_TYPE_WTDOG		0x23
+#define	SENSOR_TYPE_OEM_NFATAL_ERROR	0xC2
+#define	SENSOR_TYPE_OEM_FATAL_ERROR	0xC3
+#define SENSOR_TYPE_TXT_CMD_ERROR	0x20
+#define SENSOR_TYPE_SUPERMICRO_OEM 0xD0
+/* End of Macro for DELL Specific */
 #define SEL_OEM_TS_DATA_LEN		6
 #define SEL_OEM_NOTS_DATA_LEN		13
 struct oem_ts_spec_sel_rec{
@@ -95,6 +121,9 @@ struct oem_nots_spec_sel_rec{
 	uint8_t oem_defined[SEL_OEM_NOTS_DATA_LEN];
 };
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct sel_event_record {
 	uint16_t	record_id;
 	uint8_t	record_type;
@@ -103,7 +132,10 @@ struct sel_event_record {
 		struct oem_ts_spec_sel_rec oem_ts_type;
 		struct oem_nots_spec_sel_rec oem_nots_type;
 	} sel_type;
-} __attribute__ ((packed));
+} ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
 struct ipmi_event_sensor_types {
 	uint8_t	code;
@@ -295,6 +327,8 @@ static struct ipmi_event_sensor_types sensor_specific_types[] __attribute__((unu
 	{ 0x07, 0x08, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Processor", "Disabled" },
 	{ 0x07, 0x09, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Processor", "Terminator presence detected" },
 	{ 0x07, 0x0a, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Processor", "Throttled" },
+	{ 0x07, 0x0b, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Processor", "Uncorrectable machine check exception" },
+	{ 0x07, 0x0c, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Processor", "Correctable machine check error" },
 
 	{ 0x08, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Power Supply", "Presence detected" },
 	{ 0x08, 0x01, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Power Supply", "Failure detected" },
@@ -305,7 +339,10 @@ static struct ipmi_event_sensor_types sensor_specific_types[] __attribute__((unu
 	{ 0x08, 0x06, 0x00, IPMI_EVENT_CLASS_DISCRETE, "Power Supply", "Config Error: Vendor Mismatch" },
 	{ 0x08, 0x06, 0x01, IPMI_EVENT_CLASS_DISCRETE, "Power Supply", "Config Error: Revision Mismatch" },
 	{ 0x08, 0x06, 0x02, IPMI_EVENT_CLASS_DISCRETE, "Power Supply", "Config Error: Processor Missing" },
+	{ 0x08, 0x06, 0x03, IPMI_EVENT_CLASS_DISCRETE, "Power Supply", "Config Error: Power Supply Rating Mismatch" },
+	{ 0x08, 0x06, 0x04, IPMI_EVENT_CLASS_DISCRETE, "Power Supply", "Config Error: Voltage Rating Mismatch" },
 	{ 0x08, 0x06, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Power Supply", "Config Error" },
+	{ 0x08, 0x06, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Power Supply", "Power Supply Inactive" },
 
 	{ 0x09, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Power Unit", "Power off/down" },
 	{ 0x09, 0x01, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Power Unit", "Power cycle" },
@@ -329,6 +366,7 @@ static struct ipmi_event_sensor_types sensor_specific_types[] __attribute__((unu
 	{ 0x0c, 0x07, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Memory", "Configuration Error" },
 	{ 0x0c, 0x08, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Memory", "Spare" },
 	{ 0x0c, 0x09, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Memory", "Throttled" },
+	{ 0x0c, 0x0a, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Memory", "Critical Overtemperature" },
 
 	{ 0x0d, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Drive Slot", "Drive Present" },
 	{ 0x0d, 0x01, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Drive Slot", "Drive Fault" },
@@ -448,6 +486,7 @@ static struct ipmi_event_sensor_types sensor_specific_types[] __attribute__((unu
 	{ 0x13, 0x08, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Critical Interrupt", "Bus Uncorrectable error" },
 	{ 0x13, 0x09, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Critical Interrupt", "Fatal NMI" },
 	{ 0x13, 0x0a, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Critical Interrupt", "Bus Fatal Error" },
+	{ 0x13, 0x0b, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Critical Interrupt", "Bus Degraded" },
 
 	{ 0x14, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Button", "Power Button pressed" },
 	{ 0x14, 0x01, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Button", "Sleep Button pressed" },
@@ -460,6 +499,7 @@ static struct ipmi_event_sensor_types sensor_specific_types[] __attribute__((unu
 	{ 0x17, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Add-in Card", NULL },
 	{ 0x18, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Chassis", NULL },
 	{ 0x19, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Chip Set", NULL },
+	{ 0x19, 0x01, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Chip Set", "Thermal Trip" },
 	{ 0x1a, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Other FRU", NULL },
 
 	{ 0x1b, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Cable/Interconnect", "Connected" },
@@ -489,6 +529,10 @@ static struct ipmi_event_sensor_types sensor_specific_types[] __attribute__((unu
 	{ 0x1f, 0x04, 0xff, IPMI_EVENT_CLASS_DISCRETE, "OS Boot", "CD-ROM boot completed" },
 	{ 0x1f, 0x05, 0xff, IPMI_EVENT_CLASS_DISCRETE, "OS Boot", "ROM boot completed" },
 	{ 0x1f, 0x06, 0xff, IPMI_EVENT_CLASS_DISCRETE, "OS Boot", "boot completed - device not specified" },
+	{ 0x1f, 0x07, 0xff, IPMI_EVENT_CLASS_DISCRETE, "OS Boot", "Installation started" },
+	{ 0x1f, 0x08, 0xff, IPMI_EVENT_CLASS_DISCRETE, "OS Boot", "Installation completed" },
+	{ 0x1f, 0x09, 0xff, IPMI_EVENT_CLASS_DISCRETE, "OS Boot", "Installation aborted" },
+	{ 0x1f, 0x0a, 0xff, IPMI_EVENT_CLASS_DISCRETE, "OS Boot", "Installation failed" },
 
 	{ 0x20, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "OS Stop/Shutdown", "Error during system startup" },
 	{ 0x20, 0x01, 0xff, IPMI_EVENT_CLASS_DISCRETE, "OS Stop/Shutdown", "Run-time critical stop" },
@@ -559,15 +603,61 @@ static struct ipmi_event_sensor_types sensor_specific_types[] __attribute__((unu
 	{ 0x29, 0x02, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Battery", "Presence Detected" },
 
 	{ 0x2b, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Hardware change detected" },
-	{ 0x2b, 0x01, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected" },
+	{ 0x2b, 0x01, 0x00, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected" },
+    { 0x2b, 0x01, 0x01, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Mngmt Ctrl Dev Id" },
+    { 0x2b, 0x01, 0x02, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Mngmt Ctrl Firm Rev" },
+    { 0x2b, 0x01, 0x03, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Mngmt Ctrl Dev Rev" },
+    { 0x2b, 0x01, 0x04, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Mngmt Ctrl Manuf Id" },
+    { 0x2b, 0x01, 0x05, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Mngmt Ctrl IPMI Vers" },
+    { 0x2b, 0x01, 0x06, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Mngmt Ctrl Aux Firm Id" },
+    { 0x2b, 0x01, 0x07, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Mngmt Ctrl Firm Boot Block" },
+    { 0x2b, 0x01, 0x08, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Mngmt Ctrl Other" },
+    { 0x2b, 0x01, 0x09, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, BIOS/EFI change" },
+    { 0x2b, 0x01, 0x0A, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, SMBIOS change" },
+    { 0x2b, 0x01, 0x0B, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, O/S change" },
+    { 0x2b, 0x01, 0x0C, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, O/S loader change" },
+    { 0x2b, 0x01, 0x0D, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Service Diag change" },
+    { 0x2b, 0x01, 0x0E, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Mngmt SW agent change" },
+    { 0x2b, 0x01, 0x0F, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Mngmt SW App change" },
+    { 0x2b, 0x01, 0x10, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Mngmt SW Middle" },
+    { 0x2b, 0x01, 0x11, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, Prog HW Change (FPGA)" },
+    { 0x2b, 0x01, 0x12, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, board/FRU module change" },
+    { 0x2b, 0x01, 0x13, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, board/FRU component change" },
+    { 0x2b, 0x01, 0x14, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, board/FRU replace equ ver" },
+    { 0x2b, 0x01, 0x15, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, board/FRU replace new ver" },
+    { 0x2b, 0x01, 0x16, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, board/FRU replace old ver" },
+    { 0x2b, 0x01, 0x17, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change detected, board/FRU HW conf change" },
 	{ 0x2b, 0x02, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Hardware incompatibility detected" },
 	{ 0x2b, 0x03, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software incompatibility detected" },
 	{ 0x2b, 0x04, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Invalid or unsupported hardware version" },
 	{ 0x2b, 0x05, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Invalid or unsupported firmware or software version" },
 	{ 0x2b, 0x06, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Hardware change success" },
-	{ 0x2b, 0x07, 0xff, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success" },
+    { 0x2b, 0x07, 0x00, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success" },
+    { 0x2b, 0x07, 0x01, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Mngmt Ctrl Dev Id" },
+    { 0x2b, 0x07, 0x02, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Mngmt Ctrl Firm Rev" },
+    { 0x2b, 0x07, 0x03, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Mngmt Ctrl Dev Rev" },
+    { 0x2b, 0x07, 0x04, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Mngmt Ctrl Manuf Id" },
+    { 0x2b, 0x07, 0x05, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Mngmt Ctrl IPMI Vers" },
+    { 0x2b, 0x07, 0x06, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Mngmt Ctrl Aux Firm Id" },
+    { 0x2b, 0x07, 0x07, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Mngmt Ctrl Firm Boot Block" },
+    { 0x2b, 0x07, 0x08, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Mngmt Ctrl Other" },
+    { 0x2b, 0x07, 0x09, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, BIOS/EFI change" },
+    { 0x2b, 0x07, 0x0A, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, SMBIOS change" },
+    { 0x2b, 0x07, 0x0B, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, O/S change" },
+    { 0x2b, 0x07, 0x0C, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, O/S loader change" },
+    { 0x2b, 0x07, 0x0D, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Service Diag change" },
+    { 0x2b, 0x07, 0x0E, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Mngmt SW agent change" },
+    { 0x2b, 0x07, 0x0F, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Mngmt SW App change" },
+    { 0x2b, 0x07, 0x10, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Mngmt SW Middle" },
+    { 0x2b, 0x07, 0x11, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, Prog HW Change (FPGA)" },
+    { 0x2b, 0x07, 0x12, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, board/FRU module change" },
+    { 0x2b, 0x07, 0x13, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, board/FRU component change" },
+    { 0x2b, 0x07, 0x14, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, board/FRU replace equ ver" },
+    { 0x2b, 0x07, 0x15, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, board/FRU replace new ver" },
+    { 0x2b, 0x07, 0x16, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, board/FRU replace old ver" },
+    { 0x2b, 0x07, 0x17, IPMI_EVENT_CLASS_DISCRETE, "Version Change", "Firmware or software change success, board/FRU HW conf change" },
 
-	{ 0x2c, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "FRU State", "Not Installed" },
+    { 0x2c, 0x00, 0xff, IPMI_EVENT_CLASS_DISCRETE, "FRU State", "Not Installed" },
 	{ 0x2c, 0x01, 0xff, IPMI_EVENT_CLASS_DISCRETE, "FRU State", "Inactive" },
 	{ 0x2c, 0x02, 0xff, IPMI_EVENT_CLASS_DISCRETE, "FRU State", "Activation Requested" },
 	{ 0x2c, 0x03, 0xff, IPMI_EVENT_CLASS_DISCRETE, "FRU State", "Activation in Progress" },
@@ -597,6 +687,56 @@ static struct ipmi_event_sensor_types sensor_specific_types[] __attribute__((unu
 	{ 0xC0, 0x00, 0xff, 0x00, "OEM", "OEM Specific" },
 
 	{ 0x00, 0x00, 0x00, 0x00, NULL, NULL },
+};
+
+static uint16_t supermicro_x9dal[] = {
+		0x0635
+};
+
+static uint16_t supermicro_x9db[] = {
+		0x0733, 0x0722, 0x0703, 0x0721, 0x0716, 0x0637
+};
+
+static uint16_t supermicro_x9sb[] = {
+		0x0651
+};
+
+static uint16_t supermicro_x9[] = {
+		0x0635, 0x0733, 0x0722, 0x0703, 0x0721, 0x0716, 0x0637, 0x0651
+};
+
+static uint16_t supermicro_b8[] = {
+		0x000A, 0x061c, 0x0620, 0x0101, 0x061f, 0x0612, 0x061e
+};
+
+static uint16_t supermicro_h8[] = {
+		0xa111, 0x0408, 0x0811, 0x1411, 0x0911, 0x1211, 0x1011, 0xcd11, 0x1111, 0xbe11, 0xce11, 0xbd11,
+		0xbc11, 0xa911, 0xaa11, 0xbd11, 0xcb11, 0xad11, 0xa811, 0xac11, 0xaf11, 0xa511, 0xa011, 0x1611,
+		0x2511, 0xbf11, 0x1511, 0x2211, 0x2411, 0x1911, 0xab11, 0xd011, 0xae11, 0xca11, 0x0409, 0xa211,
+		0xa311, 0x1311, 0xba11, 0xa711, 0xd111, 0x1711, 0xcf11, 0x2011, 0x1811
+};
+
+static uint16_t supermicro_p8[] = {
+		0x6480, 0x7380, 0x6280, 0x7480, 0x5980
+};
+
+static uint16_t supermicro_x8[] = {
+		0xa880, 0x0403, 0x0100, 0x0601, 0x0001, 0x0404, 0x0606, 0x0608, 0x0632, 0x0400, 0x0401, 0x0006,
+		0x040a, 0xf280, 0x060f, 0x0609, 0x0008, 0x0613, 0x061b, 0x0007, 0x0600, 0x060c, 0x060d, 0x0614,
+		0x060c, 0x0003, 0x040b, 0x0621, 0x0610, 0x0638, 0xf380, 0x060b, 0x040d, 0x0605, 0x062d, 0x060e,
+		0x061a, 0xf580, 0x062e, 0x0009
+};
+
+static uint16_t supermicro_X8[] = {
+		0x000A, 0x061c, 0x0620, 0x0101, 0x061f, 0x0612, 0x061e, 0xa111, 0x0408, 0x0811, 0x1411, 0x0911,
+		0x1211, 0x1011, 0xcd11, 0x1111, 0xbe11, 0xce11, 0xbd11, 0xbc11, 0xa911, 0xaa11, 0xbd11, 0xcb11,
+		0xad11, 0xa811, 0xac11, 0xaf11, 0xa511, 0xa011, 0x1611, 0x2511, 0xbf11, 0x1511, 0x2211, 0x2411,
+		0x1911, 0xab11, 0xd011, 0xae11, 0xca11, 0x0409, 0xa211, 0xa311, 0x1311, 0xba11, 0xa711, 0xd111,
+		0x1711, 0xcf11, 0x2011, 0x1811, 0x6480, 0x7380, 0x6280, 0x7480, 0x5980, 0xa880, 0x0403, 0x0100,
+		0x0601, 0x0001, 0x0404, 0x0606, 0x0608, 0x0632, 0x0400, 0x0401, 0x0006, 0x040a, 0xf280, 0x060f,
+		0x0609, 0x0008, 0x0613, 0x061b, 0x0007, 0x0600, 0x060c, 0x060d, 0x0614, 0x060c, 0x0003, 0x040b,
+		0x0621, 0x0610, 0x0638, 0xf380, 0x060b, 0x040d, 0x0605, 0x062d, 0x060e, 0x061a, 0xf580, 0x062e,
+		0x0009
 };
 
 int ipmi_sel_main(struct ipmi_intf *, int, char **);

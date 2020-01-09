@@ -1,7 +1,7 @@
 Name:         ipmitool
 Summary:      Utility for IPMI control
-Version:      1.8.11
-Release:      29%{?dist}
+Version:      1.8.15
+Release:      2%{?dist}
 License:      BSD
 Group:        System Environment/Base
 URL:          http://ipmitool.sourceforge.net/
@@ -18,33 +18,18 @@ Requires: gettext
 Obsoletes: OpenIPMI-tools < 2.0.14-3
 Provides: OpenIPMI-tools = 2.0.14-3
 
-Patch1: ipmitool-1.8.10-ipmievd-init.patch
-Patch2: ipmitool-1.8.10-ipmievd-condrestart.patch
-Patch3: ipmitool-1.8.11-ipmieved-pidfile.patch
-Patch4: ipmitool-1.8.11-dell-oem.patch
-Patch5: ipmitool-1.8.11-dell-setled.patch
-Patch6: ipmitool-1.8.10-k-option.patch
-Patch7: ipmitool-1.8.11-set-kg-key.patch
-Patch8: ipmitool-1.8.11-set-kg-key2.patch
-Patch9: ipmitool-1.8.11-sol-payload-size.patch
-Patch10: ipmitool-1.8.11-dell-setled-updates.patch
-Patch11: ipmitool-1.8.11-dell-big-endian.patch
-Patch12: ipmitool-1.8.11-sol-leak.patch
-Patch13: ipmitool-1.8.11-remove-umask0.patch
-Patch14: ipmitool-1.8.11-retransmit.patch
-Patch15: ipmitool-1.8.11-dell-addons.patch
-Patch16: ipmitool-1.8.11-o-exitcode.patch
-Patch17: ipmitool-1.8.11-cmdline-checks.patch
-Patch18: ipmitool-1.8.11-no-work-setaccess.patch
-Patch19: ipmitool-1.8.11-tout-retry.patch
-Patch20: ipmitool-1.8.11-ipv6env.patch
-Patch21: ipmitool-1.8.14-dell13g.patch
-Patch22: ipmitool-1.8.14-unienv.patch
-Patch23: ipmitool-1.8.14-optenvre.patch
-Patch24: ipmitool-1.8.13-envarg.patch
-Patch25: ipmitool-1.8.15-bz1194420-ddr4.patch
-Patch26: ipmitool-1.8.11-bz1126333-slowswid.patch
-Patch27: ipmitool-1.8.11-bz878614-overname.patch
+Patch1:  0001-ipmitool-1.8.10-ipmievd-init.patch.patch
+Patch2:  0002-ipmitool-1.8.10-ipmievd-condrestart.patch.patch
+Patch3:  0003-ipmitool-1.8.11-ipmieved-pidfile.patch.patch
+Patch4:  0004-ipmitool-1.8.11-set-kg-key.patch.patch
+Patch5:  0005-ipmitool-1.8.11-set-kg-key2.patch.patch
+Patch6:  0006-ipmitool-1.8.11-sol-leak.patch.patch
+Patch7:  0007-ipmitool-1.8.11-remove-umask0.patch.patch
+Patch8:  0008-ipmitool-1.8.11-no-work-setaccess.patch.patch
+Patch9:  0009-Implement-support-to-set-options-via-environment-var.patch
+Patch10: 0010-ipmitool-1.8.11-bz1126333-slowswid.patch.patch
+Patch11: 0011-ipmitool-1.8.11-bz878614-overname.patch.patch
+Patch12: 0012-Fix-missing-return-in-ipmi_kontronoem_main-CID-12613.patch
 
 %description
 This package contains a utility for interfacing with devices that support
@@ -64,34 +49,18 @@ setting LAN configuration, and chassis power control.
 %prep
 
 %setup -q
-%patch1 -p1 -b .ipmievd-init
-%patch2 -p0 -b .condrestart
-%patch3 -p1 -b .ipmievd-pidfile
-%patch4 -p1 -b .delloem
-%patch5 -p1 -b .setled
-%patch6 -p1 -b .k-option
-%patch7 -p1 -b .set-kg
-%patch8 -p1 -b .set-kg2
-%patch9 -p1 -b .sol-payload-size
-%patch10 -p1 -b .setled-updates
-%patch11 -p1 -b .fixes
-%patch12 -p1 -b .sol-leak
-%patch13 -p1 -b .umask0
-%patch14 -p1 -b .retransmit
-%patch15 -p1 -b .dell-addons
-%patch16 -p1 -b .o-exitcode
-%patch17 -p1 -b .cmdline-checks
-%patch18 -p1 -b .no-work-setaccess
-%patch19 -p1 -b .tout-retry
-%patch20 -p1 -b .ipv6env
-%patch21 -p1 -b .13g
-%patch22 -p0 -b .unienv
-%patch23 -p1 -b .optenvre
-%patch24 -p1 -b .envarg
-%patch25 -p1 -b .ddr4
-%patch26 -p1 -b .slowswid
-%patch27 -p1 -b .overname
-
+%patch1 -p1
+%patch2 -p1
+%patch3 -p1
+%patch4 -p1
+%patch5 -p1
+%patch6 -p1
+%patch7 -p1
+%patch8 -p1
+%patch9 -p1
+%patch10 -p1
+%patch11 -p1
+%patch12 -p1
 
 for f in AUTHORS ChangeLog; do
     iconv -f iso-8859-1 -t utf8 < ${f} > ${f}.utf8
@@ -157,6 +126,13 @@ fi
 %{_datadir}/ipmitool
 
 %changelog
+* Tue Mar 08 2016 Boris Ranto <branto@redhat.com> - 1.8.15-2
+- Fix missing return in ipmi_kontronoem_main() - CID#1261317
+
+* Wed Nov 11 2015 Boris Ranto <branto@redhat.com> - 1.8.15-1
+- rebase to latest stable upstream version
+- resolves: rhbz#1253416
+
 * Thu Oct 08 2015 Tomas Smetana <tsmetana@redhat.com> - 1.8.11-29
 - remove the redundant OpenIMPI dependency
 - resolves: rhbz#1262111

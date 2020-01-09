@@ -55,6 +55,7 @@
 #include <ipmitool/ipmi_channel.h>
 #include <ipmitool/ipmi_intf.h>
 #include <ipmitool/ipmi_strings.h>
+#include <ipmitool/hpm2.h>
 #include <ipmitool/bswap.h>
 #include <openssl/rand.h>
 
@@ -64,6 +65,13 @@
 #include "lanplus_dump.h"
 #include "rmcp.h"
 #include "asf.h"
+
+/*
+ * LAN interface is required to support 45 byte request transactions and
+ * 42 byte response transactions.
+ */
+#define IPMI_LAN_MAX_REQUEST_SIZE	38	/* 45 - 7 */
+#define IPMI_LAN_MAX_RESPONSE_SIZE	34	/* 42 - 8 */
 
 extern const struct valstr ipmi_rakp_return_codes[];
 extern const struct valstr ipmi_priv_levels[];
@@ -112,8 +120,10 @@ static int check_sol_packet_for_new_data(
 static void ack_sol_packet(
 							struct ipmi_intf * intf,
 							struct ipmi_rs * rsp);
+static void ipmi_lanp_set_max_rq_data_size(struct ipmi_intf * intf, uint16_t size);
+static void ipmi_lanp_set_max_rp_data_size(struct ipmi_intf * intf, uint16_t size);
 
-static uint8_t bridgePossible = 0; 
+static uint8_t bridgePossible = 0;
 
 struct ipmi_intf ipmi_lanplus_intf = {
 	name:		"lanplus",
@@ -125,6 +135,8 @@ struct ipmi_intf ipmi_lanplus_intf = {
 	recv_sol:	ipmi_lanplus_recv_sol,
 	send_sol:	ipmi_lanplus_send_sol,
 	keepalive:	ipmi_lanplus_keepalive,
+	set_max_request_data_size: ipmi_lanp_set_max_rq_data_size,
+	set_max_response_data_size: ipmi_lanp_set_max_rp_data_size,
 	target_addr:	IPMI_BMC_SLAVE_ADDR,
 };
 
@@ -349,9 +361,12 @@ ipmi_req_remove_entry(uint8_t seq, uint8_t cmd)
 				ipmi_req_entries_tail = NULL;
 		}
 
-		if (e->msg_data)
+		if (e->msg_data) {
 			free(e->msg_data);
+			e->msg_data = NULL;
+		}
 		free(e);
+		e = NULL;
 	}
 }
 
@@ -564,6 +579,7 @@ ipmiv2_lan_ping(struct ipmi_intf * intf)
 	rv = ipmi_lan_send_packet(intf, data, len);
 
 	free(data);
+	data = NULL;
 
 	if (rv < 0) {
 		lprintf(LOG_ERR, "Unable to send IPMI presence ping packet");
@@ -645,8 +661,8 @@ ipmi_lan_poll_recv(struct ipmi_intf * intf)
 		 * 7) An Invalid packet (one that doesn't match a request)
 		 * -------------------------------------------------------------------
 		 */
-		read_session_data(rsp, &offset, intf->session);
 
+		read_session_data(rsp, &offset, intf->session);
 
 		if (lanplus_has_valid_auth_code(rsp, intf->session) == 0)
 		{
@@ -714,44 +730,45 @@ ipmi_lan_poll_recv(struct ipmi_intf * intf)
 			/* Are we expecting this packet? */
 			entry = ipmi_req_lookup_entry(rsp->payload.ipmi_response.rq_seq,
 								rsp->payload.ipmi_response.cmd);
+
 			if (entry != NULL) {
 				lprintf(LOG_DEBUG+2, "IPMI Request Match found");
-				if (
-				      intf->target_addr != intf->my_addr 
-				      &&
-					   bridgePossible
-                  &&
-                  rsp->data_len 
-                  &&
-						rsp->payload.ipmi_response.cmd == 0x34
-					) 
+				if ( intf->target_addr != intf->my_addr &&
+				     bridgePossible &&
+				     rsp->data_len &&
+				     rsp->payload.ipmi_response.cmd == 0x34 &&
+				     (rsp->payload.ipmi_response.netfn == 0x06 ||
+				     rsp->payload.ipmi_response.netfn == 0x07) &&
+				     rsp->payload.ipmi_response.rs_lun == 0 )
 				{
-               /* Check completion code */
-               if (rsp->data[offset-1] == 0)
-               {
-					   lprintf(LOG_DEBUG, "Bridged command answer,"
-					         " waiting for next answer... ");
-      				ipmi_req_remove_entry(rsp->payload.ipmi_response.rq_seq,
-								rsp->payload.ipmi_response.cmd);
-                  ipmi_lan_poll_recv(intf);
-                  return;
+					/* Check completion code */
+					if (rsp->data[offset-1] == 0)
+					{
+						lprintf(LOG_DEBUG, "Bridged command answer,"
+						     " waiting for next answer... ");
+						ipmi_req_remove_entry(
+							rsp->payload.ipmi_response.rq_seq,
+							rsp->payload.ipmi_response.cmd);
+						return ipmi_lan_poll_recv(intf);
 					}
 					else
-					{		
-					   lprintf(LOG_DEBUG, "WARNING: Bridged "
-								"cmd ccode = 0x%02x",
-								rsp->data[offset-1]);
-               }
+					{
+						lprintf(LOG_DEBUG, "WARNING: Bridged "
+								   "cmd ccode = 0x%02x",
+								   rsp->data[offset-1]);
+					}
 
 					if (rsp->data_len &&
-						 rsp->payload.ipmi_response.cmd == 0x34) {
-                  memcpy(rsp->data, &rsp->data[offset],(rsp->data_len-offset)); 
-						printbuf(
-							&rsp->data[offset],
+					    rsp->payload.ipmi_response.cmd == 0x34) {
+						memcpy(rsp->data, &rsp->data[offset],
+							(rsp->data_len-offset));
+						if (verbose > 2)
+							printbuf( &rsp->data[offset],
 							(rsp->data_len-offset),
 							"bridge command response");
 					}
 				}
+
 				ipmi_req_remove_entry(rsp->payload.ipmi_response.rq_seq,
 								rsp->payload.ipmi_response.cmd);
 			} else {
@@ -1351,9 +1368,9 @@ void getIpmiPayloadWireRep(
 	len = 0;
 
 	/* IPMI Message Header -- Figure 13-4 of the IPMI v2.0 spec */
-	if ((intf->target_addr == ourAddress) || (!bridgePossible))
+	if ((intf->target_addr == ourAddress) || (!bridgePossible)) {
 		cs = len;
-	else {
+	} else {
 		bridgedRequest = 1;
 
 		if(intf->transit_addr != ourAddress && intf->transit_addr != 0)
@@ -1403,6 +1420,13 @@ void getIpmiPayloadWireRep(
 			cs = len;
 		}
 	}
+
+        lprintf(LOG_DEBUG,"%s RqAddr %#x transit %#x:%#x target %#x:%#x "
+		"bridgePossible %d",
+		bridgedRequest ? "Bridging" : "Local",
+		intf->my_addr, intf->transit_addr, intf->transit_channel,
+		intf->target_addr, intf->target_channel,
+		bridgePossible);
 
 	/* rsAddr */
 	msg[len++] = intf->target_addr; /* IPMI_BMC_SLAVE_ADDR; */
@@ -1706,6 +1730,7 @@ ipmi_lanplus_build_v2x_msg(
 		lprintf(LOG_ERR, "unsupported payload type 0x%x",
 			payload->payload_type);
 		free(msg);
+		msg = NULL;
 		assert(0);
 		break;
 	}
@@ -1843,7 +1868,8 @@ ipmi_lanplus_build_v2x_msg(
 static struct ipmi_rq_entry *
 ipmi_lanplus_build_v2x_ipmi_cmd(
 								struct ipmi_intf * intf,
-								struct ipmi_rq * req)
+								struct ipmi_rq * req,
+								int isRetry)
 {
 	struct ipmi_v2_payload v2_payload;
 	struct ipmi_rq_entry * entry;
@@ -1856,7 +1882,8 @@ ipmi_lanplus_build_v2x_ipmi_cmd(
 	 */
 	static uint8_t curr_seq = 0;
 
-	curr_seq += 1;
+	if( isRetry == 0 )
+		curr_seq += 1;
 
 	if (curr_seq >= 64)
 		curr_seq = 0;
@@ -2084,24 +2111,31 @@ ipmi_lanplus_send_payload(
 	uint8_t             * msg_data;
 	int                   msg_length;
 	struct ipmi_session * session = intf->session;
+	struct ipmi_rq_entry * entry = NULL;
 	int                   try = 0;
 	int                   xmit = 1;
 	time_t                ltime;
+	uint32_t	      saved_timeout;
 
 	if (!intf->opened && intf->open && intf->open(intf) < 0)
 		return NULL;
 
+	/*
+	 * The session timeout is initialized in the above interface open,
+	 * so it will only be valid after the open completes.
+	 */
+	saved_timeout = session->timeout;
 	while (try < session->retry) {
-		ltime = time(NULL);
+		//ltime = time(NULL);
 
 		if (xmit) {
+			ltime = time(NULL);
 
 			if (payload->payload_type == IPMI_PAYLOAD_TYPE_IPMI)
 			{
 				/*
 				 * Build an IPMI v1.5 or v2 command
 				 */
-				struct ipmi_rq_entry * entry;
 				struct ipmi_rq * ipmi_request = payload->payload.ipmi_request.request;
 
 				lprintf(LOG_DEBUG, "");
@@ -2134,8 +2168,10 @@ ipmi_lanplus_send_payload(
 				}
 				else
 				{
+					int isRetry = ( try > 0 ? 1 : 0 );
+
 					lprintf(LOG_DEBUG+1, "BUILDING A v2 COMMAND");
-					entry = ipmi_lanplus_build_v2x_ipmi_cmd(intf, ipmi_request);
+					entry = ipmi_lanplus_build_v2x_ipmi_cmd(intf, ipmi_request, isRetry);
 				}
 
 				if (entry == NULL) {
@@ -2150,7 +2186,8 @@ ipmi_lanplus_send_payload(
 			else if (payload->payload_type == IPMI_PAYLOAD_TYPE_RMCP_OPEN_REQUEST)
 			{
 				lprintf(LOG_DEBUG, ">> SENDING AN OPEN SESSION REQUEST\n");
-				assert(session->v2_data.session_state == LANPLUS_STATE_PRESESSION);
+				assert(session->v2_data.session_state == LANPLUS_STATE_PRESESSION
+						|| session->v2_data.session_state == LANPLUS_STATE_OPEN_SESSION_SENT);
 
 				ipmi_lanplus_build_v2x_msg(intf,        /* in  */
 								payload,     /* in  */
@@ -2225,11 +2262,17 @@ ipmi_lanplus_send_payload(
 		{
 		case IPMI_PAYLOAD_TYPE_RMCP_OPEN_REQUEST:
 			session->v2_data.session_state = LANPLUS_STATE_OPEN_SESSION_SENT;
+			/* not retryable for timeouts, force no retry */
+			try = session->retry;
 			break;
 		case IPMI_PAYLOAD_TYPE_RAKP_1:
 			session->v2_data.session_state = LANPLUS_STATE_RAKP_1_SENT;
+			/* not retryable for timeouts, force no retry */
+			try = session->retry;
 			break;
 		case IPMI_PAYLOAD_TYPE_RAKP_3:
+			/* not retryable for timeouts, force no retry */
+			try = session->retry;
 			session->v2_data.session_state = LANPLUS_STATE_RAKP_3_SENT;
 			break;
 		}
@@ -2269,24 +2312,36 @@ ipmi_lanplus_send_payload(
 		else
 		{
 			rsp = ipmi_lan_poll_recv(intf);
+
+			/* Duplicate Request ccode most likely indicates a response to
+			   a previous retry. Ignore and keep polling. */
+			while ((rsp != NULL) && (rsp->ccode == 0xcf))
+			{
+				rsp = NULL;
+				rsp = ipmi_lan_poll_recv(intf);
+			}
+
 			if (rsp)
 				break;
+			/* This payload type is retryable for timeouts. */
+			if ((payload->payload_type == IPMI_PAYLOAD_TYPE_IPMI) && entry) {
+				ipmi_req_remove_entry( entry->rq_seq, entry->req.msg.cmd);
+			}
 		}
 
-		xmit = ((time(NULL) - ltime) >= intf->session->timeout);
+		/* only timeout if time exceeds the timeout value */
+		xmit = ((time(NULL) - ltime) >= session->timeout);
 
 		usleep(5000);
 
 		if (xmit) {
-			/* incremet session timeout each retry */
-			intf->session->timeout++;
+			/* increment session timeout by 1 second each retry */
+			session->timeout++;
 		}
 
 		try++;
 	}
-
-	/* Reset timeout after retry loop completes */
-	intf->session->timeout = IPMI_LAN_TIMEOUT;
+	session->timeout = saved_timeout;
 
 	/* IPMI messages are deleted under ipmi_lan_poll_recv() */
 	switch (payload->payload_type) {
@@ -2294,6 +2349,7 @@ ipmi_lanplus_send_payload(
 	case IPMI_PAYLOAD_TYPE_RAKP_1:
 	case IPMI_PAYLOAD_TYPE_RAKP_3:
 		free(msg_data);
+		msg_data = NULL;
 		break;
 	}
 
@@ -2677,6 +2733,7 @@ ipmi_close_session_cmd(struct ipmi_intf * intf)
 
 	backupBridgePossible = bridgePossible;
 
+	intf->target_addr = IPMI_BMC_SLAVE_ADDR;
 	bridgePossible = 0;
 
 	bmc_session_lsbf = intf->session->v2_data.bmc_id;
@@ -2736,6 +2793,7 @@ ipmi_lanplus_open_session(struct ipmi_intf * intf)
 	struct ipmi_session * session = intf->session;
 	uint8_t * msg;
 	struct ipmi_rs * rsp;
+	/* 0 = success, 1 = error, 2 = timeout */
 	int rc = 0;
 
 
@@ -2745,7 +2803,7 @@ ipmi_lanplus_open_session(struct ipmi_intf * intf)
 	msg = (uint8_t*)malloc(IPMI_OPEN_SESSION_REQUEST_SIZE);
 	if (msg == NULL) {
 		lprintf(LOG_ERR, "ipmitool: malloc failure");
-		return -1;
+		return 1;
 	}
 
 	memset(msg, 0, IPMI_OPEN_SESSION_REQUEST_SIZE);
@@ -2774,7 +2832,8 @@ ipmi_lanplus_open_session(struct ipmi_intf * intf)
 		lprintf(LOG_WARNING, "Unsupported cipher suite ID : %d\n",
 				session->cipher_suite_id);
 		free(msg);
-		return -1;
+		msg = NULL;
+		return 1;
 	}
 
 
@@ -2822,10 +2881,13 @@ ipmi_lanplus_open_session(struct ipmi_intf * intf)
 	rsp = ipmi_lanplus_send_payload(intf, &v2_payload);
 
 	free(msg);
-
+	msg = NULL;
+	if (rsp == NULL ) {
+		lprintf(LOG_DEBUG, "Timeout in open session response message.");
+		return 2;
+	}
 	if (verbose)
 		lanplus_dump_open_session_response(rsp);
-
 
 	if (rsp->payload.open_session_response.rakp_return_code !=
 		IPMI_RAKP_STATUS_NO_ERRORS)
@@ -2833,7 +2895,7 @@ ipmi_lanplus_open_session(struct ipmi_intf * intf)
 		lprintf(LOG_WARNING, "Error in open session response message : %s\n",
 			val2str(rsp->payload.open_session_response.rakp_return_code,
 				ipmi_rakp_return_codes));
-		return -1;
+		return 1;
 	}
 	else
 	{
@@ -2867,7 +2929,7 @@ ipmi_lanplus_open_session(struct ipmi_intf * intf)
 					"not what we requested 0x%02x\n",
 					rsp->payload.open_session_response.auth_alg,
 					session->v2_data.requested_auth_alg);
-			rc = -1;
+			rc = 1;
 		}
 		else if (rsp->payload.open_session_response.integrity_alg !=
 				 session->v2_data.requested_integrity_alg)
@@ -2876,7 +2938,7 @@ ipmi_lanplus_open_session(struct ipmi_intf * intf)
 					"not what we requested 0x%02x\n",
 					rsp->payload.open_session_response.integrity_alg,
 					session->v2_data.requested_integrity_alg);
-			rc = -1;
+			rc = 1;
 		}
 		else if (rsp->payload.open_session_response.crypt_alg !=
 				 session->v2_data.requested_crypt_alg)
@@ -2885,7 +2947,7 @@ ipmi_lanplus_open_session(struct ipmi_intf * intf)
 					"not what we requested 0x%02x\n",
 					rsp->payload.open_session_response.crypt_alg,
 					session->v2_data.requested_crypt_alg);
-			rc = -1;
+			rc = 1;
 		}
 
 	}
@@ -2919,7 +2981,7 @@ ipmi_lanplus_rakp1(struct ipmi_intf * intf)
 	struct ipmi_session * session = intf->session;
 	uint8_t * msg;
 	struct ipmi_rs * rsp;
-	int rc = 0;
+	int rc = 0;    /* 0 = success, 1 = error, 2 = timeout */
 
 	/*
 	 * Build a RAKP 1 message
@@ -2952,6 +3014,7 @@ ipmi_lanplus_rakp1(struct ipmi_intf * intf)
 		lprintf(LOG_ERR, "ERROR generating random number "
 			"in ipmi_lanplus_rakp1");
 		free(msg);
+		msg = NULL;
 		return 1;
 	}
 	memcpy(msg + 8, session->v2_data.console_rand, 16);
@@ -2981,6 +3044,7 @@ ipmi_lanplus_rakp1(struct ipmi_intf * intf)
 			"(Exceeds %d characters)",
 			IPMI_MAX_USER_NAME_LENGTH);
 		free(msg);
+		msg = NULL;
 		return 1;
 	}
 	memcpy(msg + 28, session->username, msg[27]);
@@ -2993,11 +3057,12 @@ ipmi_lanplus_rakp1(struct ipmi_intf * intf)
 	rsp = ipmi_lanplus_send_payload(intf, &v2_payload);
 
 	free(msg);
+	msg = NULL;
 
 	if (rsp == NULL)
 	{
-		lprintf(LOG_INFO, "> Error: no response from RAKP 1 message");
-		return 1;
+		lprintf(LOG_WARNING, "> Error: no response from RAKP 1 message");
+		return 2;
 	}
 
 	session->v2_data.session_state = LANPLUS_STATE_RAKP_2_RECEIVED;
@@ -3116,6 +3181,7 @@ ipmi_lanplus_rakp3(struct ipmi_intf * intf)
 			/* Error */
 			lprintf(LOG_INFO, "> Error generating RAKP 3 authcode");
 			free(msg);
+			msg = NULL;
 			return 1;
 		}
 		else
@@ -3125,11 +3191,12 @@ ipmi_lanplus_rakp3(struct ipmi_intf * intf)
 		}
 
 		/* Generate our Session Integrity Key, K1, and K2 */
-		if (lanplus_generate_sik(session))
+		if (lanplus_generate_sik(session, intf))
 		{
 			/* Error */
 			lprintf(LOG_INFO, "> Error generating session integrity key");
 			free(msg);
+			msg = NULL;
 			return 1;
 		}
 		else if (lanplus_generate_k1(session))
@@ -3137,6 +3204,7 @@ ipmi_lanplus_rakp3(struct ipmi_intf * intf)
 			/* Error */
 			lprintf(LOG_INFO, "> Error generating K1 key");
 			free(msg);
+			msg = NULL;
 			return 1;
 		}
 		else if (lanplus_generate_k2(session))
@@ -3144,6 +3212,7 @@ ipmi_lanplus_rakp3(struct ipmi_intf * intf)
 			/* Error */
 			lprintf(LOG_INFO, "> Error generating K1 key");
 			free(msg);
+			msg = NULL;
 			return 1;
 		}
 	}
@@ -3152,6 +3221,7 @@ ipmi_lanplus_rakp3(struct ipmi_intf * intf)
 	rsp = ipmi_lanplus_send_payload(intf, &v2_payload);
 
 	free(msg);
+	msg = NULL;
 
 	if (session->v2_data.rakp2_return_code != IPMI_RAKP_STATUS_NO_ERRORS)
 	{
@@ -3164,8 +3234,8 @@ ipmi_lanplus_rakp3(struct ipmi_intf * intf)
 	}
 	else if (rsp == NULL)
 	{
-		lprintf(LOG_INFO, "> Error: no response from RAKP 3 message");
-		return 1;
+		lprintf(LOG_WARNING, "> Error: no response from RAKP 3 message");
+		return 2;
 	}
 
 
@@ -3221,12 +3291,10 @@ ipmi_lanplus_close(struct ipmi_intf * intf)
 		close(intf->fd);
 
 	ipmi_req_clear_entries();
-
-	if (intf->session)
-		free(intf->session);
-
+	ipmi_intf_session_cleanup(intf);
 	intf->session = NULL;
 	intf->opened = 0;
+	intf->manufacturer_id = IPMI_OEM_UNKNOWN;
 	intf = NULL;
 }
 
@@ -3257,6 +3325,7 @@ ipmi_set_session_privlvl_cmd(struct ipmi_intf * intf)
 	if (rsp == NULL) {
 		lprintf(LOG_ERR, "Set Session Privilege Level to %s failed",
 			val2str(privlvl, ipmi_privlvl_vals));
+		bridgePossible = backupBridgePossible;
 		return -1;
 	}
 	if (verbose > 2)
@@ -3266,6 +3335,7 @@ ipmi_set_session_privlvl_cmd(struct ipmi_intf * intf)
 		lprintf(LOG_ERR, "Set Session Privilege Level to %s failed: %s",
 			val2str(privlvl, ipmi_privlvl_vals),
 			val2str(rsp->ccode, completion_code_vals));
+		bridgePossible = backupBridgePossible;
 		return -1;
 	}
 
@@ -3284,14 +3354,13 @@ int
 ipmi_lanplus_open(struct ipmi_intf * intf)
 {
 	int rc;
+	int retry;
 	struct get_channel_auth_cap_rsp auth_cap;
-	struct sockaddr_in addr;
 	struct ipmi_session *session;
 
 	if (!intf || !intf->session)
 		return -1;
 	session = intf->session;
-
 
 	if (!session->port)
 		session->port = IPMI_LANPLUS_PORT;
@@ -3311,7 +3380,6 @@ ipmi_lanplus_open(struct ipmi_intf * intf)
 
 
 	/* Setup our lanplus session state */
-	session->v2_data.session_state    = LANPLUS_STATE_PRESESSION;
 	session->v2_data.auth_alg         = IPMI_AUTH_RAKP_NONE;
 	session->v2_data.crypt_alg        = IPMI_CRYPT_NONE;
 	session->v2_data.console_id       = 0x00;
@@ -3324,102 +3392,91 @@ ipmi_lanplus_open(struct ipmi_intf * intf)
 	/* Kg is set in ipmi_intf */
 	//memset(session->v2_data.kg,  0, IPMI_KG_BUFFER_SIZE);
 
-
-	/* open port to BMC */
-	memset(&addr, 0, sizeof(struct sockaddr_in));
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(session->port);
-
-	rc = inet_pton(AF_INET, (const char *)session->hostname, &addr.sin_addr);
-	if (rc <= 0) {
-		struct hostent *host = gethostbyname((const char *)session->hostname);
-		if (host == NULL) {
-			lprintf(LOG_ERR, "Address lookup for %s failed",
-				session->hostname);
-			return -1;
-		}
-		addr.sin_family = host->h_addrtype;
-		memcpy(&addr.sin_addr, host->h_addr, host->h_length);
-	}
-
-	lprintf(LOG_DEBUG, "IPMI LAN host %s port %d",
-		session->hostname, ntohs(addr.sin_port));
-
-	intf->fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (intf->fd < 0) {
-		lperror(LOG_ERR, "Socket failed");
+	if (ipmi_intf_socket_connect (intf) == -1) {
+		lprintf(LOG_ERR, "Could not open socket!");
 		return -1;
 	}
 
-
-	/* connect to UDP socket so we get async errors */
-	rc = connect(intf->fd,
-				 (struct sockaddr *)&addr, sizeof(struct sockaddr_in));
-	if (rc < 0) {
-		lperror(LOG_ERR, "Connect failed");
+	if (intf->fd < 0) {
+		lperror(LOG_ERR, "Connect to %s failed",
+			session->hostname);
 		intf->close(intf);
 		return -1;
 	}
 
 	intf->opened = 1;
 
-
 	/*
 	 *
 	 * Make sure the BMC supports IPMI v2 / RMCP+
-	 *
-	 * I'm not sure why we accept a failure for the first call
 	 */
-	if (ipmi_get_auth_capabilities_cmd(intf, &auth_cap)) {
-		sleep(1);
-		if (ipmi_get_auth_capabilities_cmd(intf, &auth_cap));
-		{
-			lprintf(LOG_INFO, "Error issuing Get Channel "
-				"Authentication Capabilies request");
-			goto fail;
-		}
+	if (!ipmi_oem_active(intf, "i82571spt") &&
+			ipmi_get_auth_capabilities_cmd(intf, &auth_cap)) {
+		lprintf(LOG_INFO, "Error issuing Get Channel "
+			"Authentication Capabilies request");
+		goto fail;
 	}
 
-	if (! auth_cap.v20_data_available)
+	if (!ipmi_oem_active(intf, "i82571spt") && ! auth_cap.v20_data_available)
 	{
 		lprintf(LOG_INFO, "This BMC does not support IPMI v2 / RMCP+");
 		goto fail;
 	}
 
-
 	/*
-	 * Open session
+	 * If the open/rakp1/rakp3 sequence encounters a timeout, the whole sequence
+	 * needs to restart. The individual messages are not individually retryable,
+	 * as the session state is advancing.
 	 */
-	if (ipmi_lanplus_open_session(intf)){
-		intf->close(intf);
-		goto fail;
+	for (retry = 0; retry < IPMI_LAN_RETRY; retry++) {
+		session->v2_data.session_state = LANPLUS_STATE_PRESESSION;
+		/*
+		 * Open session
+		 */
+		if ((rc = ipmi_lanplus_open_session(intf)) == 1) {
+			intf->close(intf);
+			goto fail;
+		}
+		if (rc == 2) {
+			lprintf(LOG_DEBUG, "Retry lanplus open session, %d", retry);
+			continue;
+		}
+		/*
+		 * RAKP 1
+		 */
+		if ((rc = ipmi_lanplus_rakp1(intf)) == 1) {
+			intf->close(intf);
+			goto fail;
+		}
+		if (rc == 2) {
+			lprintf(LOG_DEBUG, "Retry lanplus rakp1, %d", retry);
+			continue;
+		}
+		/*
+		 * RAKP 3
+		 */
+		if ((rc = ipmi_lanplus_rakp3(intf)) == 1) {
+			intf->close(intf);
+			goto fail;
+		}
+		if (rc == 0) break;
+		lprintf(LOG_DEBUG,"Retry lanplus rakp3, %d", retry);
 	}
-
-	/*
-	 * RAKP 1
-	 */
-	if (ipmi_lanplus_rakp1(intf)){
-		intf->close(intf);
-		goto fail;
-	}
-
-
-	/*
-	 * RAKP 3
-	 */
-	if (ipmi_lanplus_rakp3(intf)){
-		intf->close(intf);
-		goto fail;
-	}
-
 
 	lprintf(LOG_DEBUG, "IPMIv2 / RMCP+ SESSION OPENED SUCCESSFULLY\n");
 
+	if (!ipmi_oem_active(intf, "i82571spt")) {
+		rc = ipmi_set_session_privlvl_cmd(intf);
+		if (rc < 0) {
+			intf->close(intf);
+			goto fail;
+		}
+	}
+	intf->manufacturer_id = ipmi_get_oem(intf);
 	bridgePossible = 1;
 
-	rc = ipmi_set_session_privlvl_cmd(intf);
-	if (rc < 0)
-		goto fail;
+	/* automatically detect interface request and response sizes */
+	hpm2_detect_max_payload_size(intf);
 
 	return intf->fd;
 
@@ -3572,5 +3629,46 @@ static int ipmi_lanplus_setup(struct ipmi_intf * intf)
 		return -1;
 	}
 	memset(intf->session, 0, sizeof(struct ipmi_session));
+
+    /* setup default LAN maximum request and response sizes */
+    intf->max_request_data_size = IPMI_LAN_MAX_REQUEST_SIZE;
+    intf->max_response_data_size = IPMI_LAN_MAX_RESPONSE_SIZE;
+
 	return 0;
+}
+
+static void ipmi_lanp_set_max_rq_data_size(struct ipmi_intf * intf, uint16_t size)
+{
+	if (intf->session->cipher_suite_id == 3) {
+		/*
+		 * encrypted payload can only be multiple of 16 bytes
+		 */
+		size &= ~15;
+
+		/*
+		 * decrement payload size on confidentiality header size
+		 * plus minimal confidentiality trailer size
+		 */
+		size -= (16 + 1);
+	}
+
+	intf->max_request_data_size = size;
+}
+
+static void ipmi_lanp_set_max_rp_data_size(struct ipmi_intf * intf, uint16_t size)
+{
+	if (intf->session->cipher_suite_id == 3) {
+		/*
+		 * encrypted payload can only be multiple of 16 bytes
+		 */
+		size &= ~15;
+
+		/*
+		 * decrement payload size on confidentiality header size
+		 * plus minimal confidentiality trailer size
+		 */
+		size -= (16 + 1);
+	}
+
+	intf->max_response_data_size = size;
 }

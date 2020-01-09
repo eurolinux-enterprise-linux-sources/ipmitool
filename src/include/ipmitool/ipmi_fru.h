@@ -63,20 +63,31 @@ enum {
 struct fru_info {
 	uint16_t size;
 	uint8_t access:1;
-} __attribute__ ((packed));
+	uint8_t max_read_size;
+	uint8_t max_write_size;
+};
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_header {
 	uint8_t version;
-	struct {
-		uint8_t internal;
-		uint8_t chassis;
-		uint8_t board;
-		uint8_t product;
-		uint8_t multi;
-	} offset;
+	union {
+		struct {
+			uint8_t internal;
+			uint8_t chassis;
+			uint8_t board;
+			uint8_t product;
+			uint8_t multi;
+		} offset;
+		uint8_t offsets[5];
+	};
 	uint8_t pad;
 	uint8_t checksum;
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
 struct fru_area_chassis {
 	uint8_t area_ver;
@@ -111,6 +122,9 @@ struct fru_area_product {
 	char * fru;
 };
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_multirec_header {
 #define FRU_RECORD_TYPE_POWER_SUPPLY_INFORMATION 0x00
 #define FRU_RECORD_TYPE_DC_OUTPUT 0x01
@@ -124,8 +138,14 @@ struct fru_multirec_header {
 	uint8_t len;
 	uint8_t record_checksum;
 	uint8_t header_checksum;
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_multirec_powersupply {
 #if WORDS_BIGENDIAN
 	uint16_t capacity;
@@ -168,11 +188,17 @@ struct fru_multirec_powersupply {
 #endif
 	uint16_t combined_capacity;
 	uint8_t rps_threshold;
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
 static const char * combined_voltage_desc[] __attribute__((unused)) = {
 "12 V", "-12 V", "5 V", "3.3 V"};
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_multirec_dcoutput {
 #if WORDS_BIGENDIAN
 	uint8_t standby:1;
@@ -189,8 +215,14 @@ struct fru_multirec_dcoutput {
 	uint16_t ripple_and_noise;
 	uint16_t min_current;
 	uint16_t max_current;
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_multirec_dcload {
 #if WORDS_BIGENDIAN
 	uint8_t __reserved:4;
@@ -205,8 +237,14 @@ struct fru_multirec_dcload {
 	uint16_t ripple_and_noise;
 	uint16_t min_current;
 	uint16_t max_current;
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_multirec_oem_header {
 	unsigned char mfg_id[3];
 #define FRU_PICMG_BACKPLANE_P2P			0x04
@@ -236,12 +274,24 @@ struct fru_multirec_oem_header {
 #define FRU_PICMG_CLK_CONFIG			0x2D
 	unsigned char record_id;
 	unsigned char record_version;
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_guid {
 	unsigned char guid[16];
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_link_desc {
 #ifndef WORDS_BIGENDIAN
 	unsigned int desig_channel:6;
@@ -268,7 +318,10 @@ struct fru_picmgext_link_desc {
 	unsigned int desig_if:2;
 	unsigned int desig_channel:6;
 #endif
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
 
 #define FRU_PICMGEXT_AMC_LINK_TYPE_RESERVED			 	  0x00
@@ -280,11 +333,20 @@ struct fru_picmgext_link_desc {
 #define FRU_PICMGEXT_AMC_LINK_TYPE_RAPIDIO              0x06
 #define FRU_PICMGEXT_AMC_LINK_TYPE_STORAGE              0x07
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 /* This is used in command, not in FRU */
 struct fru_picmgext_amc_link_info {
    unsigned char linkInfo[3];
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_amc_link_desc_core {
 #ifndef WORDS_BIGENDIAN
 	unsigned int designator:12;
@@ -297,8 +359,14 @@ struct fru_picmgext_amc_link_desc_core {
 	unsigned int type:8;
 	unsigned int designator:12;
 #endif
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_amc_link_desc_extra {
 #ifndef WORDS_BIGENDIAN
 	unsigned char asymetricMatch:2;
@@ -307,9 +375,15 @@ struct fru_picmgext_amc_link_desc_extra {
 	unsigned char reserved:6;
 	unsigned char asymetricMatch:2;
 #endif
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_amc_link_desc {
 #ifndef WORDS_BIGENDIAN
    struct fru_picmgext_amc_link_desc_core  core;/* lsb */
@@ -318,56 +392,92 @@ struct fru_picmgext_amc_link_desc {
    struct fru_picmgext_amc_link_desc_extra extra;
    struct fru_picmgext_amc_link_desc_core  core;/* lsb */
 #endif
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
 
 #define FRU_PICMGEXT_OEM_SWFW 0x03
 #define OEM_SWFW_NBLOCK_OFFSET 0x05
 #define OEM_SWFW_FIELD_START_OFFSET 0x06
 
-
+#define FRU_PICMGEXT_CHN_DESC_RECORD_SIZE 3
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_chn_desc {
 #ifndef WORDS_BIGENDIAN
-	unsigned char remote_slot:8;
-	unsigned char remote_chn:5;
-	unsigned char local_chn:5;
-	unsigned char:6;
+	unsigned int remote_slot:8;
+	unsigned int remote_chn:5;
+	unsigned int local_chn:5;
+	unsigned int res:14;
 #else
-	unsigned char:6;
-	unsigned char local_chn:5;
-	unsigned char remote_chn:5;
-	unsigned char remote_slot:8;
+	unsigned int res:14;
+	unsigned int local_chn:5;
+	unsigned int remote_chn:5;
+	unsigned int remote_slot:8;
 #endif
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_slot_desc {
 	unsigned char chan_type;
 	unsigned char slot_addr;
 	unsigned char chn_count;
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
 #define FRU_PICMGEXT_DESIGN_IF_BASE				0x00
 #define FRU_PICMGEXT_DESIGN_IF_FABRIC			0x01
 #define FRU_PICMGEXT_DESIGN_IF_UPDATE_CHANNEL	0x02
 #define FRU_PICMGEXT_DESIGN_IF_RESERVED			0x03
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_carrier_activation_record {
 	unsigned short max_internal_curr;
 	unsigned char  allowance_for_readiness;
    unsigned char  module_activation_record_count;
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_activation_record {
 	unsigned char ibmb_addr;
 	unsigned char max_module_curr;
 	unsigned char reserved;
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_carrier_p2p_record {
 	unsigned char resource_id;
 	unsigned char p2p_count;
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_carrier_p2p_descriptor {
 #ifndef WORDS_BIGENDIAN
 	unsigned char  remote_resource_id;
@@ -380,8 +490,14 @@ struct fru_picmgext_carrier_p2p_descriptor {
 	unsigned short remote_port:5;
 	unsigned char  remote_resource_id;
 #endif
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_amc_p2p_record {
 #ifndef WORDS_BIGENDIAN
 	unsigned char resource_id         :4;
@@ -392,24 +508,38 @@ struct fru_picmgext_amc_p2p_record {
 	unsigned char /* reserved */      :3;
 	unsigned char resource_id         :4;
 #endif 
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#define FRU_PICMGEXT_AMC_CHANNEL_DESC_RECORD_SIZE 3
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_amc_channel_desc_record {
 #ifndef WORDS_BIGENDIAN
-	unsigned char lane0port           :5;
-	unsigned char lane1port           :5;
-	unsigned char lane2port           :5;
-	unsigned char lane3port           :5;
-	unsigned char  /*reserved */     :4;
-#else	
-	unsigned char /*reserved  */     :4;
-	unsigned char lane3port           :5;
-	unsigned char lane2port           :5;
-	unsigned char lane1port           :5;
-	unsigned char lane0port           :5;
+	unsigned int lane0port           :5;
+	unsigned int lane1port           :5;
+	unsigned int lane2port           :5;
+	unsigned int lane3port           :5;
+	unsigned int /* reserved */      :12;
+#else
+	unsigned int /* reserved */      :12;
+	unsigned int lane3port           :5;
+	unsigned int lane2port           :5;
+	unsigned int lane1port           :5;
+	unsigned int lane0port           :5;
 #endif 
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
 
+#define FRU_PICMGEXT_AMC_LINK_DESC_RECORD_SIZE 5
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
 struct fru_picmgext_amc_link_desc_record {
 	#define FRU_PICMGEXT_AMC_LINK_TYPE_PCIE		0x02
 	#define FRU_PICMGEXT_AMC_LINK_TYPE_PCIE_AS1	0x03
@@ -430,31 +560,36 @@ struct fru_picmgext_amc_link_desc_record {
 	#define AMC_LINK_TYPE_EXT_STORAGE_SATA	0x01
 	#define AMC_LINK_TYPE_EXT_STORAGE_SAS	0x02
 #ifndef WORDS_BIGENDIAN
-	unsigned short channel_id          :8;
-	unsigned short port_flag_0         :1;
-	unsigned short port_flag_1         :1;
-	unsigned short port_flag_2         :1;
-	unsigned short port_flag_3         :1;
-	unsigned short type                :8;
-	unsigned short type_ext            :4;
-	unsigned short group_id            :8;
-	unsigned char  asym_match          :2;
-	unsigned char  /* reserved */      :6;
+	unsigned int channel_id          :8;
+	unsigned int port_flag_0         :1;
+	unsigned int port_flag_1         :1;
+	unsigned int port_flag_2         :1;
+	unsigned int port_flag_3         :1;
+	unsigned int type                :8;
+	unsigned int type_ext            :4;
+	unsigned int group_id            :8;
+	unsigned int asym_match          :2;
+	unsigned int  /* reserved */     :30;
 #else	
-	unsigned char  /* reserved */      :6;
-	unsigned char  asym_match          :2;
-	unsigned short group_id            :8;
-	unsigned short type_ext            :4;
-	unsigned short type                :8;
-	unsigned short port_flag_3         :1;
-	unsigned short port_flag_2         :1;
-	unsigned short port_flag_1         :1;
-	unsigned short port_flag_0         :1;
-	unsigned short channel_id          :8;
+	unsigned int group_id            :8;
+	unsigned int type_ext            :4;
+	unsigned int type                :8;
+	unsigned int port_flag_3         :1;
+	unsigned int port_flag_2         :1;
+	unsigned int port_flag_1         :1;
+	unsigned int port_flag_0         :1;
+	unsigned int channel_id          :8;
+
+	unsigned int  /* reserved */     :30;
+	unsigned int asym_match          :2;
 #endif 
-} __attribute__ ((packed));
+}ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
+
 /* FRU Board manufacturing date */
-static const uint64_t secs_from_1970_1996 = 820450800;
+static const uint64_t secs_from_1970_1996 = 820454400;
 static const char * chassis_type_desc[] __attribute__((unused)) = {
 	"Unspecified", "Other", "Unknown",
 	"Desktop", "Low Profile Desktop", "Pizza Box",
@@ -463,7 +598,24 @@ static const char * chassis_type_desc[] __attribute__((unused)) = {
 	    "Docking Station", "All in One", "Sub Notebook",
 	    "Space-saving", "Lunch Box", "Main Server Chassis",
 	    "Expansion Chassis", "SubChassis", "Bus Expansion Chassis",
-	    "Peripheral Chassis", "RAID Chassis", "Rack Mount Chassis"};
+	    "Peripheral Chassis", "RAID Chassis", "Rack Mount Chassis",
+	    "Sealed-case PC", "Multi-system Chassis", "CompactPCI",
+	    "AdvancedTCA", "Blade", "Blade Enclosure"
+};
+
+typedef struct ipmi_fru_bloc {
+	struct ipmi_fru_bloc * next;
+	uint16_t start;
+	uint16_t size;
+	uint8_t  blocId[32];
+} t_ipmi_fru_bloc;
+
+static const char *section_id[4] = {
+	"Internal Use Section",
+	"Chassis Section",
+	"Board Section",
+	"Product Section"
+};
 
 int ipmi_fru_main(struct ipmi_intf *intf, int argc, char **argv);
 int ipmi_fru_print(struct ipmi_intf *intf, struct sdr_record_fru_locator *fru);

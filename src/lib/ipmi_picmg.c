@@ -34,6 +34,7 @@
 #include <ipmitool/ipmi_intf.h>
 #include <ipmitool/ipmi_picmg.h>
 #include <ipmitool/ipmi_fru.h>		/* for access to link descriptor defines */
+#include <ipmitool/ipmi_strings.h>
 #include <ipmitool/log.h>
 
 #define PICMG_EXTENSION_ATCA_MAJOR_VERSION  2
@@ -53,34 +54,59 @@
 #define PICMG_EKEY_AMC_MAX_CHANNEL  16
 #define PICMG_EKEY_AMC_MAX_DEVICE   15 /* 4 bits */
 
+
+typedef enum picmg_bused_resource_mode {
+	PICMG_BUSED_RESOURCE_SUMMARY,
+} t_picmg_bused_resource_mode ;
+
+
+typedef enum picmg_card_type {
+	PICMG_CARD_TYPE_CPCI,
+	PICMG_CARD_TYPE_ATCA,
+	PICMG_CARD_TYPE_AMC,
+	PICMG_CARD_TYPE_RESERVED
+} t_picmg_card_type ;
+
 /* This is the version of the PICMG Extenstion */
-static unsigned char PicmgExtMajorVersion;
+static t_picmg_card_type PicmgCardType = PICMG_CARD_TYPE_RESERVED;
 
 void
 ipmi_picmg_help (void)
 {
-	printf(" properties           - get PICMG properties\n");
-	printf(" frucontrol           - FRU control\n");
-	printf(" addrinfo             - get address information\n");
-	printf(" activate             - activate a FRU\n");
-	printf(" deactivate           - deactivate a FRU\n");
-	printf(" policy get           - get the FRU activation policy\n");
-	printf(" policy set           - set the FRU activation policy\n");
-	printf(" portstate get        - get port state \n");
-	printf(" portstate getdenied  - get all denied[disabled] port description\n");
-	printf(" portstate getgranted - get all granted[enabled] port description\n");
-	printf(" portstate getall     - get all port state description\n");
-	printf(" portstate set        - set port state \n");
-	printf(" amcportstate get     - get port state \n");
-	printf(" amcportstate set     - set port state \n");
-	printf(" led prop             - get led properties\n");
-	printf(" led cap              - get led color capabilities\n");
-	printf(" led get              - get led state\n");
-	printf(" led set              - set led state\n");
-	printf(" power get            - get power level info\n");
-	printf(" power set            - set power level\n");
-	printf(" clk get              - get clk state\n");
-	printf(" clk set              - set clk state\n");
+	lprintf(LOG_NOTICE, "PICMG commands:");
+	lprintf(LOG_NOTICE, " properties           - get PICMG properties");
+	lprintf(LOG_NOTICE, " frucontrol           - FRU control");
+	lprintf(LOG_NOTICE, " addrinfo             - get address information");
+	lprintf(LOG_NOTICE, " activate             - activate a FRU");
+	lprintf(LOG_NOTICE, " deactivate           - deactivate a FRU");
+	lprintf(LOG_NOTICE, " policy get           - get the FRU activation policy");
+	lprintf(LOG_NOTICE, " policy set           - set the FRU activation policy");
+	lprintf(LOG_NOTICE, " portstate get        - get port state");
+	lprintf(LOG_NOTICE,
+			" portstate getdenied  - get all denied[disabled] port description");
+	lprintf(LOG_NOTICE,
+			" portstate getgranted - get all granted[enabled] port description");
+	lprintf(LOG_NOTICE,
+			" portstate getall     - get all port state description");
+	lprintf(LOG_NOTICE, " portstate set        - set port state");
+	lprintf(LOG_NOTICE, " amcportstate get     - get port state");
+	lprintf(LOG_NOTICE, " amcportstate set     - set port state");
+	lprintf(LOG_NOTICE, " led prop             - get led properties");
+	lprintf(LOG_NOTICE, " led cap              - get led color capabilities");
+	lprintf(LOG_NOTICE, " led get              - get led state");
+	lprintf(LOG_NOTICE, " led set              - set led state");
+	lprintf(LOG_NOTICE, " power get            - get power level info");
+	lprintf(LOG_NOTICE, " power set            - set power level");
+	lprintf(LOG_NOTICE, " clk get              - get clk state");
+	lprintf(LOG_NOTICE,
+			" clk getdenied        - get all(up to 16) denied[disabled] clock descriptions");
+	lprintf(LOG_NOTICE,
+			" clk getgranted       - get all(up to 16) granted[enabled] clock descriptions");
+	lprintf(LOG_NOTICE,
+			" clk getall           - get all(up to 16) clock descriptions");
+	lprintf(LOG_NOTICE, " clk set              - set clk state");
+	lprintf(LOG_NOTICE,
+			" busres summary       - display brief bused resource status info");
 }
 
 
@@ -104,6 +130,425 @@ struct sAmcAddrMap {
 	{0x88, "reserved", 0},
 };
 
+/* is_amc_channel - wrapper to convert user input into integer
+ * AMC Channel range seems to be <0..255>, bits [7:0]
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @amc_chan_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_amc_channel(const char *argv_ptr, uint8_t *amc_chan_ptr)
+{
+	if (!argv_ptr || !amc_chan_ptr) {
+		lprintf(LOG_ERR, "is_amc_channel(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, amc_chan_ptr) == 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given AMC Channel '%s' is invalid.", argv_ptr);
+	return (-1);
+}
+/* is_amc_dev - wrapper to convert user input into integer.
+ * AMC Dev ID limits are uknown.
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @amc_dev_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_amc_dev(const char *argv_ptr, int32_t *amc_dev_ptr)
+{
+	if (!argv_ptr || !amc_dev_ptr) {
+		lprintf(LOG_ERR, "is_amc_dev(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2int(argv_ptr, amc_dev_ptr) == 0 && *amc_dev_ptr >= 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given PICMG Device '%s' is invalid.",
+			argv_ptr);
+	return (-1);
+}
+/* is_amc_intf - wrapper to convert user input into integer.
+ * AMC Interface (ID) limits are uknown.
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @amc_intf_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_amc_intf(const char *argv_ptr, int32_t *amc_intf_ptr)
+{
+	if (!argv_ptr || !amc_intf_ptr) {
+		lprintf(LOG_ERR, "is_amc_intf(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2int(argv_ptr, amc_intf_ptr) == 0 && *amc_intf_ptr >= 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given PICMG Interface '%s' is invalid.",
+			argv_ptr);
+	return (-1);
+}
+/* is_amc_port - wrapper to convert user input into integer.
+ * AMC Port limits are uknown.
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @amc_port_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_amc_port(const char *argv_ptr, int32_t *amc_port_ptr)
+{
+	if (!argv_ptr || !amc_port_ptr) {
+		lprintf(LOG_ERR, "is_amc_port(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2int(argv_ptr, amc_port_ptr) == 0 && *amc_port_ptr >= 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given PICMG Port '%s' is invalid.", argv_ptr);
+	return (-1);
+}
+/* is_clk_acc - wrapper to convert user input into integer.
+ * Clock Accuracy limits are uknown[1byte by spec].
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @clk_acc_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_clk_acc(const char *argv_ptr, uint8_t *clk_acc_ptr)
+{
+	if (!argv_ptr || !clk_acc_ptr) {
+		lprintf(LOG_ERR, "is_clk_acc(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, clk_acc_ptr) == 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given Clock Accuracy '%s' is invalid.",
+			argv_ptr);
+	return (-1);
+}
+/* is_clk_family - wrapper to convert user input into integer.
+ * Clock Family limits are uknown[1byte by spec].
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @clk_family_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_clk_family(const char *argv_ptr, uint8_t *clk_family_ptr)
+{
+	if (!argv_ptr || !clk_family_ptr) {
+		lprintf(LOG_ERR, "is_clk_family(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, clk_family_ptr) == 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given Clock Family '%s' is invalid.",
+			argv_ptr);
+	return (-1);
+}
+/* is_clk_freq - wrapper to convert user input into integer.
+ * Clock Frequency limits are uknown, but specification says
+ * 3Bytes + 1B checksum
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @clk_freq_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_clk_freq(const char *argv_ptr, uint32_t *clk_freq_ptr)
+{
+	if (!argv_ptr || !clk_freq_ptr) {
+		lprintf(LOG_ERR, "is_clk_freq(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uint(argv_ptr, clk_freq_ptr) == 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given Clock Frequency '%s' is invalid.",
+			argv_ptr);
+	return (-1);
+}
+/* is_clk_id - wrapper to convert user input into integer.
+ * Clock ID limits are uknown, however it's 1B by specification and I've
+ * found two ranges: <1..5> or <0..15>
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @clk_id_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_clk_id(const char *argv_ptr, uint8_t *clk_id_ptr)
+{
+	if (!argv_ptr || !clk_id_ptr) {
+		lprintf(LOG_ERR, "is_clk_id(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, clk_id_ptr) == 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given Clock ID '%s' is invalid.", argv_ptr);
+	return (-1);
+}
+/* is_clk_index - wrapper to convert user input into integer.
+ * Clock Index limits are uknown[1B by spec]
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @clk_index_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_clk_index(const char *argv_ptr, uint8_t *clk_index_ptr)
+{
+	if (!argv_ptr || !clk_index_ptr) {
+		lprintf(LOG_ERR, "is_clk_index(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, clk_index_ptr) == 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given Clock Index '%s' is invalid.", argv_ptr);
+	return (-1);
+}
+/* is_clk_resid - wrapper to convert user input into integer.
+ * Clock Resource Index(?) limits are uknown, but maximum seems to be 15.
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @clk_resid_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_clk_resid(const char *argv_ptr, int8_t *clk_resid_ptr)
+{
+	if (!argv_ptr || !clk_resid_ptr) {
+		lprintf(LOG_ERR, "is_clk_resid(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2char(argv_ptr, clk_resid_ptr) == 0
+			&& *clk_resid_ptr > (-1)) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given Resource ID '%s' is invalid.",
+			clk_resid_ptr);
+	return (-1);
+}
+/* is_clk_setting - wrapper to convert user input into integer.
+ * Clock Setting is a 1B bitfield:
+ * x [7:4] - reserved
+ * x [3] - state - 0/1
+ * x [2] - direction - 0/1
+ * x [1:0] - PLL ctrl - 00/01/10/11[Reserved]
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @clk_setting_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_clk_setting(const char *argv_ptr, uint8_t *clk_setting_ptr)
+{
+	if (!argv_ptr || !clk_setting_ptr) {
+		lprintf(LOG_ERR, "is_clk_setting(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, clk_setting_ptr) == 0) {
+		return 0;
+	}
+	/* FIXME - validate bits 4-7 are 0 ? */
+	lprintf(LOG_ERR, "Given Clock Setting '%s' is invalid.", argv_ptr);
+	return (-1);
+}
+/* is_enable - wrapper to convert user input into integer.
+ * Valid input range for Enable is <0..1>.
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @enable_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_enable(const char *argv_ptr, uint8_t *enable_ptr)
+{
+	if (!argv_ptr || !enable_ptr) {
+		lprintf(LOG_ERR, "is_enable(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, enable_ptr) == 0
+			&& (*enable_ptr == 0 || *enable_ptr == 1)) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given Enable '%s' is invalid.", argv_ptr);
+	return (-1);
+}
+/* is_enable - wrapper to convert user input into integer.
+ * LED colors: 
+ * - valid <1..6>, <0xE..0xF>
+ * - reserved [0, 7]
+ * - undefined <8..D>
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @enable_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_led_color(const char *argv_ptr, uint8_t *led_color_ptr)
+{
+	if (!argv_ptr || !led_color_ptr) {
+		lprintf(LOG_ERR, "is_led_color(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, led_color_ptr) != 0) {
+		lprintf(LOG_ERR, "Given LED Color '%s' is invalid.",
+				argv_ptr);
+		lprintf(LOG_ERR,
+				"LED Color must be from ranges: <1..6>, <0xE..0xF>");
+		return (-1);
+	}
+	if ((*led_color_ptr >= 1 && *led_color_ptr <= 6)
+			|| (*led_color_ptr >= 0xE && *led_color_ptr <= 0xF)) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given LED Color '%s' is out of range.", argv_ptr);
+	lprintf(LOG_ERR, "LED Color must be from ranges: <1..6>, <0xE..0xF>");
+	return (-1);
+}
+/* is_led_duration - wrapper to convert user input into integer.
+ * LED duration range is <1..127>
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @enable_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_led_duration(const char *argv_ptr, uint8_t *led_duration_ptr)
+{
+	if (!argv_ptr || !led_duration_ptr) {
+		lprintf(LOG_ERR, "is_led_duration(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, led_duration_ptr) == 0
+			&& *led_duration_ptr > 0 && *led_duration_ptr <= 127) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given LED Duration '%s' is invalid", argv_ptr);
+	return (-1);
+}
+/* is_led_function - wrapper to convert user input into integer.
+ * LED functions, however, might differ by OEM:
+ * - 0x00 - off override
+ * - <0x01..0xFA> - blinking override
+ * - 0xFB - lamp test state
+ * - 0xFC - state restored to local ctrl state
+ * - <0xFD..0xFE> - reserved
+ * - 0xFF - on override
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @led_fn_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_led_function(const char *argv_ptr, uint8_t *led_fn_ptr)
+{
+	if (!argv_ptr || !led_fn_ptr) {
+		lprintf(LOG_ERR, "is_led_function(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, led_fn_ptr) == 0
+			&& (*led_fn_ptr < 0xFD || *led_fn_ptr > 0xFE)) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given LED Function '%s' is invalid.", argv_ptr);
+	return (-1);
+}
+/* is_led_id - wrapper to convert user input into integer.
+ * LED ID range seems to be <0..255>
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @led_id_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_led_id(const char *argv_ptr, uint8_t *led_id_ptr)
+{
+	if (!argv_ptr || !led_id_ptr) {
+		lprintf(LOG_ERR, "is_led_id(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, led_id_ptr) == 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given LED ID '%s' is invalid.", argv_ptr);
+	return (-1);
+}
+/* is_link_group - wrapper to convert user input into integer.
+ * Link Grouping ID limis are unknown, bits [31:24] by spec.
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @link_grp_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_link_group(const char *argv_ptr, uint8_t *link_grp_ptr)
+{
+	if (!argv_ptr || !link_grp_ptr) {
+		lprintf(LOG_ERR, "is_link_group(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, link_grp_ptr) == 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given Link Group '%s' is invalid.", argv_ptr);
+	return (-1);
+}
+/* is_link_type - wrapper to convert user input into integer.
+ * Link Type limits are unknown, bits [19:12]
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @link_type_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_link_type(const char *argv_ptr, uint8_t *link_type_ptr)
+{
+	if (!argv_ptr || !link_type_ptr) {
+		lprintf(LOG_ERR, "is_link_type(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, link_type_ptr) == 0) {
+		return 0;
+	}
+	lprintf(LOG_ERR, "Given Link Type '%s' is invalid.", argv_ptr);
+	return (-1);
+}
+/* is_link_type_ext - wrapper to convert user input into integer.
+ * Link Type Extension limits are unknown, bits [23:20] => <0..15> ?
+ *
+ * @argv_ptr: source string to convert from; usually argv
+ * @link_type_ext_ptr: pointer where to store result
+ * returns: zero on success, other values mean error
+ */
+int
+is_link_type_ext(const char *argv_ptr, uint8_t *link_type_ext_ptr)
+{
+	if (!argv_ptr || !link_type_ext_ptr) {
+		lprintf(LOG_ERR, "is_link_type_ext(): invalid argument(s).");
+		return (-1);
+	}
+	if (str2uchar(argv_ptr, link_type_ext_ptr) != 0
+			|| *link_type_ext_ptr > 15) {
+		lprintf(LOG_ERR,
+				"Given Link Type Extension '%s' is invalid.",
+				argv_ptr);
+		return (-1);
+	}
+	return 0;
+}
+
 int
 ipmi_picmg_getaddr(struct ipmi_intf * intf, int argc, char ** argv)
 {
@@ -120,13 +565,19 @@ ipmi_picmg_getaddr(struct ipmi_intf * intf, int argc, char ** argv)
 	msg_data[1] = 0;   /* default fru id */
 
 	if(argc > 0) {
-		msg_data[1] = strtoul(argv[0], NULL,0);   /* FRU ID */
+		if (is_fru_id(argv[0], &msg_data[1]) != 0) {
+			return (-1);
+		}
 	}
 
 	rsp = intf->sendrecv(intf, &req);
-	if (!rsp  || rsp->ccode) {
-		printf("Error getting address information CC: 0x%02x\n", rsp->ccode);
-		return -1;
+	if (!rsp) {
+		lprintf(LOG_ERR, "Error. No valid response received.");
+		return (-1);
+	} else if (rsp->ccode) {
+		lprintf(LOG_ERR, "Error getting address information CC: 0x%02x",
+				rsp->ccode);
+		return (-1);
 	}
 
 	printf("Hardware Address : 0x%02x\n", rsp->data[1]);
@@ -181,6 +632,7 @@ ipmi_picmg_getaddr(struct ipmi_intf * intf, int argc, char ** argv)
 int
 ipmi_picmg_properties(struct ipmi_intf * intf, int show )
 {
+	unsigned char PicmgExtMajorVersion;
 	struct ipmi_rs * rsp;
 	struct ipmi_rq req;
 	unsigned char msg_data;
@@ -194,7 +646,7 @@ ipmi_picmg_properties(struct ipmi_intf * intf, int show )
 
 	rsp = intf->sendrecv(intf, &req);
 	if (!rsp  || rsp->ccode) {
-		printf("Error getting address information\n");
+		lprintf(LOG_ERR, "Error getting address information.");
 		return -1;
 	}
 
@@ -211,6 +663,16 @@ ipmi_picmg_properties(struct ipmi_intf * intf, int show )
       to know how to format some commands */
 	PicmgExtMajorVersion = rsp->data[1]&0x0f;
 
+	if( PicmgExtMajorVersion == PICMG_CPCI_MAJOR_VERSION  ) { 
+		PicmgCardType = PICMG_CARD_TYPE_CPCI;
+   }
+	else if(  PicmgExtMajorVersion == PICMG_ATCA_MAJOR_VERSION) {
+		PicmgCardType = PICMG_CARD_TYPE_ATCA;
+   }
+	else if(  PicmgExtMajorVersion == PICMG_AMC_MAJOR_VERSION) {
+		PicmgCardType = PICMG_CARD_TYPE_AMC;
+   }
+    
 	return 0;
 }
 
@@ -234,17 +696,19 @@ ipmi_picmg_fru_activation(struct ipmi_intf * intf, int argc, char ** argv, unsig
 	req.msg.data_len = 3;
 
 	cmd.picmg_id  = 0;						/* PICMG identifier */
-	cmd.fru_id    = (unsigned char) atoi(argv[0]);			/* FRU ID	*/
+	if (is_fru_id(argv[0], &(cmd.fru_id)) != 0) {
+		return (-1);
+	}
 	cmd.fru_state = state;
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp  || rsp->ccode) {
-		printf("Error activation/deactivation of FRU\n");
+		lprintf(LOG_ERR, "Error activation/deactivation of FRU.");
 		return -1;
 	}
 	if (rsp->data[0] != 0x00) {
-		printf("Error\n");
+		lprintf(LOG_ERR, "Error activation/deactivation of FRU.");
 	}
 
 	return 0;
@@ -266,17 +730,19 @@ ipmi_picmg_fru_activation_policy_get(struct ipmi_intf * intf, int argc, char ** 
 	req.msg.data_len = 2;
 
 	msg_data[0] = 0;								/* PICMG identifier */
-	msg_data[1] = (unsigned char) atoi(argv[0]);	/* FRU ID			*/
-
+	if (is_fru_id(argv[0], &msg_data[1]) != 0) {
+		return (-1);
+	}
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "FRU activation policy get failed with CC code 0x%02x",
+				rsp->ccode);
 		return -1;
 	}
 
@@ -303,19 +769,35 @@ ipmi_picmg_fru_activation_policy_set(struct ipmi_intf * intf, int argc, char ** 
 	req.msg.data_len = 4;
 
 	msg_data[0] = 0;								            /* PICMG identifier */
-	msg_data[1] = (unsigned char) atoi(argv[0]);	      /* FRU ID */
-	msg_data[2] = (unsigned char) atoi(argv[1])& 0x03; /* FRU act policy mask  */
-	msg_data[3] = (unsigned char) atoi(argv[2])& 0x03; /* FRU act policy set bits */
+	if (is_fru_id(argv[0], &msg_data[1]) != 0) {
+		return (-1);
+	}
+	if (str2uchar(argv[1], &msg_data[2]) != 0 || msg_data[2] > 1) {
+		/* FRU Lock Mask */
+		lprintf(LOG_ERR, "Given FRU Lock Mask '%s' is invalid.",
+				argv[1]);
+		return (-1);
+	}
+	if (str2uchar(argv[2], &msg_data[3]) != 0 || msg_data[3] > 1) {
+		/* FRU Act Policy */
+		lprintf(LOG_ERR,
+				"Given FRU Activation Policy '%s' is invalid.",
+				argv[2]);
+		return (-1);
+	}
+	msg_data[2]&= 0x03;
+	msg_data[3]&= 0x03;
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "FRU activation policy set failed with CC code 0x%02x",
+				rsp->ccode);
 		return -1;
 	}
 
@@ -325,8 +807,8 @@ ipmi_picmg_fru_activation_policy_set(struct ipmi_intf * intf, int argc, char ** 
 #define PICMG_MAX_LINK_PER_CHANNEL 4
 
 int
-ipmi_picmg_portstate_get(struct ipmi_intf * intf, int interface,int channel,
-								 int mode)
+ipmi_picmg_portstate_get(struct ipmi_intf * intf, int32_t interface,
+		uint8_t channel, int mode)
 {
 	struct ipmi_rs * rsp = NULL;
 	struct ipmi_rq req;
@@ -349,13 +831,14 @@ ipmi_picmg_portstate_get(struct ipmi_intf * intf, int interface,int channel,
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
 		if( mode == PICMG_EKEY_MODE_QUERY ){
-			printf("returned CC code 0x%02x\n", rsp->ccode);
+			lprintf(LOG_ERR, "FRU portstate get failed with CC code 0x%02x",
+					rsp->ccode);
 		}
 		return -1;
 	}
@@ -395,11 +878,11 @@ ipmi_picmg_portstate_get(struct ipmi_intf * intf, int interface,int channel,
 					}
 					else if (d->type >= 0x06 && d->type <= 0xef)
 					{
-						printf("Reserved\n",d->type);
+						printf("Reserved\n");
 					}
 					else if (d->type >= 0xf0 && d->type <= 0xfe)
 					{
-						printf("OEM GUID Definition\n",d->type);
+						printf("OEM GUID Definition\n");
 					}
 					else
 					{
@@ -456,7 +939,7 @@ ipmi_picmg_portstate_get(struct ipmi_intf * intf, int interface,int channel,
 	}
 	else
 	{
-		lprintf(LOG_NOTICE,"Unexpected answer, can't print result");
+		lprintf(LOG_ERR, "Unexpected answer, can't print result.");
 	}
 
 	return 0;
@@ -464,14 +947,14 @@ ipmi_picmg_portstate_get(struct ipmi_intf * intf, int interface,int channel,
 
 
 int
-ipmi_picmg_portstate_set(struct ipmi_intf * intf, int interface, int channel,
-								 int port, int type, int typeext, int group, int enable)
+ipmi_picmg_portstate_set(struct ipmi_intf * intf, int32_t interface,
+		uint8_t channel, int32_t port, uint8_t type,
+		uint8_t typeext, uint8_t group, uint8_t enable)
 {
 	struct ipmi_rs * rsp;
 	struct ipmi_rq req;
 
 	unsigned char msg_data[6];
-	struct fru_picmgext_link_desc* d;
 
 	memset(&req, 0, sizeof(req));
 
@@ -485,17 +968,18 @@ ipmi_picmg_portstate_set(struct ipmi_intf * intf, int interface, int channel,
 	msg_data[2] = (port & 0xf) | ((type & 0xf) << 4);
 	msg_data[3] = ((type >> 4) & 0xf) | ((typeext & 0xf) << 4);
 	msg_data[4] = group & 0xff;
-	msg_data[5]	  = (unsigned char) (enable & 0x01);		/* en/dis */
+	msg_data[5] = (enable & 0x01); /* enable/disable */
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "Picmg portstate set failed with CC code 0x%02x",
+				rsp->ccode);
 		return -1;
 	}
 
@@ -509,8 +993,8 @@ ipmi_picmg_portstate_set(struct ipmi_intf * intf, int interface, int channel,
 #define PICMG_AMC_MAX_LINK_PER_CHANNEL 4
 
 int
-ipmi_picmg_amc_portstate_get(struct ipmi_intf * intf,int device,int channel,
-								 int mode)
+ipmi_picmg_amc_portstate_get(struct ipmi_intf * intf, int32_t device,
+		uint8_t channel, int mode)
 {
 	struct ipmi_rs * rsp;
 	struct ipmi_rq req;
@@ -526,7 +1010,7 @@ ipmi_picmg_amc_portstate_get(struct ipmi_intf * intf,int device,int channel,
 	req.msg.data	  = msg_data;
 
 	/* FIXME : add check for AMC or carrier device */
-	if(device == -1 || PicmgExtMajorVersion != 2){
+	if(device == -1 || PicmgCardType != PICMG_CARD_TYPE_ATCA ){
 		req.msg.data_len = 2;	/* for amc only channel */
 	}else{
 		req.msg.data_len = 3;	/* for carrier channel and device */
@@ -540,13 +1024,14 @@ ipmi_picmg_amc_portstate_get(struct ipmi_intf * intf,int device,int channel,
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
 		if( mode == PICMG_EKEY_MODE_QUERY ){
-			printf("returned CC code 0x%02x\n", rsp->ccode);
+			lprintf(LOG_ERR, "Amc portstate get failed with CC code 0x%02x",
+					rsp->ccode);
 		}
 		return -1;
 	}
@@ -595,7 +1080,7 @@ ipmi_picmg_amc_portstate_get(struct ipmi_intf * intf,int device,int channel,
 					)
 				)
 				{
-					if(device == -1 || PicmgExtMajorVersion != 2){
+					if(device == -1 || PicmgCardType != PICMG_CARD_TYPE_ATCA ){
 						printf("   Link device :         AMC\n");
 					}else{
                   printf("   Link device :         0x%02x\n", device );
@@ -648,8 +1133,9 @@ ipmi_picmg_amc_portstate_get(struct ipmi_intf * intf,int device,int channel,
 
 
 int
-ipmi_picmg_amc_portstate_set(struct ipmi_intf * intf, int channel, int port,
-							  int type, int typeext, int group, int enable, int device)
+ipmi_picmg_amc_portstate_set(struct ipmi_intf * intf, uint8_t channel,
+		int32_t port, uint8_t type, uint8_t typeext,
+		uint8_t group, uint8_t enable, int32_t device)
 {
 	struct ipmi_rs	 * rsp;
 	struct ipmi_rq	 req;
@@ -680,12 +1166,13 @@ ipmi_picmg_amc_portstate_set(struct ipmi_intf * intf, int channel, int port,
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "Amc portstate set failed with CC code 0x%02x",
+				rsp->ccode);
 		return -1;
 	}
 
@@ -709,22 +1196,25 @@ ipmi_picmg_get_led_properties(struct ipmi_intf * intf, int argc, char ** argv)
 	req.msg.data_len = 2;
 
 	msg_data[0] = 0x00;									/* PICMG identifier */
-	msg_data[1] = atoi(argv[0]);						/* FRU-ID */
+	if (is_fru_id(argv[0], &msg_data[1]) != 0) {
+		return (-1);
+	}
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "LED get properties failed with CC code 0x%02x",
+				rsp->ccode);
 		return -1;
 	}
 
-	printf("General Status LED Properties:  0x%2x\n\r", rsp->data[1] );
-	printf("App. Specific  LED Count:       0x%2x\n\r", rsp->data[2] );
+	printf("General Status LED Properties:  0x%2x\n", rsp->data[1] );
+	printf("App. Specific  LED Count:       0x%2x\n", rsp->data[2] );
 
 	return 0;
 }
@@ -746,33 +1236,35 @@ ipmi_picmg_get_led_capabilities(struct ipmi_intf * intf, int argc, char ** argv)
 	req.msg.data_len = 3;
 
 	msg_data[0] = 0x00;									/* PICMG identifier */
-	msg_data[1] = atoi(argv[0]);						/* FRU-ID */
-	msg_data[2] = atoi(argv[1]);						/* LED-ID */
-
+	if (is_fru_id(argv[0], &msg_data[1]) != 0
+			|| is_led_id(argv[1], &msg_data[2]) != 0) {
+		return (-1);
+	}
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "LED get capabilities failed with CC code 0x%02x",
+				rsp->ccode);
 		return -1;
 	}
 
-	printf("LED Color Capabilities: ", rsp->data[1] );
+	printf("LED Color Capabilities: ");
 	for ( i=0 ; i<8 ; i++ ) {
 		if ( rsp->data[1] & (0x01 << i) ) {
 			printf("%s, ", led_color_str[ i ]);
 		}
 	}
-	printf("\n\r");
+	printf("\n");
 
-	printf("Default LED Color in\n\r");
-	printf("      LOCAL control:  %s\n\r", led_color_str[ rsp->data[2] ] );
-	printf("      OVERRIDE state: %s\n\r", led_color_str[ rsp->data[3] ] );
+	printf("Default LED Color in\n");
+	printf("      LOCAL control:  %s\n", led_color_str[ rsp->data[2] ] );
+	printf("      OVERRIDE state: %s\n", led_color_str[ rsp->data[3] ] );
 
 	return 0;
 }
@@ -793,67 +1285,68 @@ ipmi_picmg_get_led_state(struct ipmi_intf * intf, int argc, char ** argv)
 	req.msg.data_len = 3;
 
 	msg_data[0] = 0x00;									/* PICMG identifier */
-	msg_data[1] = atoi(argv[0]);						/* FRU-ID */
-	msg_data[2] = atoi(argv[1]);						/* LED-ID */
-
+	if (is_fru_id(argv[0], &msg_data[1]) != 0
+			|| is_led_id(argv[1], &msg_data[2]) != 0) {
+		return (-1);
+	}
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "LED get state failed with CC code 0x%02x", rsp->ccode);
 		return -1;
 	}
 
 	printf("LED states:						  %x	", rsp->data[1] );
 	if (rsp->data[1] == 0x1)
-		printf("[LOCAL CONTROL]\n\r");
+		printf("[LOCAL CONTROL]\n");
 	else if (rsp->data[1] == 0x2)
-		printf("[OVERRIDE]\n\r");
+		printf("[OVERRIDE]\n");
 	else if (rsp->data[1] == 0x4)
-		printf("[LAMPTEST]\n\r");
+		printf("[LAMPTEST]\n");
 	else
-		printf("\n\r");
+		printf("\n");
 
 	printf("  Local Control function:     %x  ", rsp->data[2] );
 	if (rsp->data[2] == 0x0)
-		printf("[OFF]\n\r");
+		printf("[OFF]\n");
 	else if (rsp->data[2] == 0xff)
-		printf("[ON]\n\r");
+		printf("[ON]\n");
 	else
-		printf("[BLINKING]\n\r");
+		printf("[BLINKING]\n");
 
-	printf("  Local Control On-Duration:  %x\n\r", rsp->data[3] );
-	printf("  Local Control Color:        %x  [%s]\n\r", rsp->data[4], led_color_str[ rsp->data[4] ]);
+	printf("  Local Control On-Duration:  %x\n", rsp->data[3] );
+	printf("  Local Control Color:        %x  [%s]\n", rsp->data[4], led_color_str[ rsp->data[4] ]);
 
 	/* override state or lamp test */
 	if (rsp->data[1] == 0x02) {
 		printf("  Override function:     %x  ", rsp->data[5] );
 		if (rsp->data[2] == 0x0)
-			printf("[OFF]\n\r");
+			printf("[OFF]\n");
 		else if (rsp->data[2] == 0xff)
-			printf("[ON]\n\r");
+			printf("[ON]\n");
 		else
-			printf("[BLINKING]\n\r");
+			printf("[BLINKING]\n");
 
-		printf("  Override On-Duration:  %x\n\r", rsp->data[6] );
-		printf("  Override Color:        %x  [%s]\n\r", rsp->data[7], led_color_str[ rsp->data[7] ]);
+		printf("  Override On-Duration:  %x\n", rsp->data[6] );
+		printf("  Override Color:        %x  [%s]\n", rsp->data[7], led_color_str[ rsp->data[7] ]);
 
 	}else if (rsp->data[1] == 0x06) {
 		printf("  Override function:     %x  ", rsp->data[5] );
 		if (rsp->data[2] == 0x0)
-			printf("[OFF]\n\r");
+			printf("[OFF]\n");
 		else if (rsp->data[2] == 0xff)
-			printf("[ON]\n\r");
+			printf("[ON]\n");
 		else
-			printf("[BLINKING]\n\r");
-		printf("  Override On-Duration:  %x\n\r", rsp->data[6] );
-		printf("  Override Color:        %x  [%s]\n\r", rsp->data[7], led_color_str[ rsp->data[7] ]);
-		printf("  Lamp test duration:    %x\n\r", rsp->data[8] );
+			printf("[BLINKING]\n");
+		printf("  Override On-Duration:  %x\n", rsp->data[6] );
+		printf("  Override Color:        %x  [%s]\n", rsp->data[7], led_color_str[ rsp->data[7] ]);
+		printf("  Lamp test duration:    %x\n", rsp->data[8] );
 	}
 
 	return 0;
@@ -875,21 +1368,23 @@ ipmi_picmg_set_led_state(struct ipmi_intf * intf, int argc, char ** argv)
 	req.msg.data_len = 6;
 
 	msg_data[0] = 0x00;									/* PICMG identifier */
-	msg_data[1] = atoi(argv[0]);						/* FRU-ID			  */
-	msg_data[2] = atoi(argv[1]);						/* LED-ID			  */
-	msg_data[3] = atoi(argv[2]);						/* LED function	  */
-	msg_data[4] = atoi(argv[3]);						/* LED on duration  */
-	msg_data[5] = atoi(argv[4]);						/* LED color		  */
+	if (is_fru_id(argv[0], &msg_data[1]) != 0
+			|| is_led_id(argv[1], &msg_data[2]) != 0
+			|| is_led_function(argv[2], &msg_data[3]) != 0
+			|| is_led_duration(argv[3], &msg_data[4]) != 0
+			|| is_led_color(argv[4], &msg_data[5]) != 0) {
+		return (-1);
+	}
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "LED set state failed with CC code 0x%02x", rsp->ccode);
 		return -1;
 	}
 
@@ -914,19 +1409,25 @@ ipmi_picmg_get_power_level(struct ipmi_intf * intf, int argc, char ** argv)
 	req.msg.data_len = 3;
 
 	msg_data[0] = 0x00;									/* PICMG identifier */
-	msg_data[1] = atoi(argv[0]);						/* FRU-ID			  */
-	msg_data[2] = atoi(argv[1]);						/* Power type		  */
-
+	if (is_fru_id(argv[0], &msg_data[1]) != 0) {
+		return (-1);
+	}
+	/* PICMG Power Type - <0..3> */
+	if (str2uchar(argv[1], &msg_data[2]) != 0 || msg_data[2] > 3) {
+		lprintf(LOG_ERR, "Given Power Type '%s' is invalid",
+				argv[1]);
+		return (-1);
+	}
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "Power level get failed with CC code 0x%02x", rsp->ccode);
 		return -1;
 	}
 
@@ -945,7 +1446,6 @@ ipmi_picmg_get_power_level(struct ipmi_intf * intf, int argc, char ** argv)
 int
 ipmi_picmg_set_power_level(struct ipmi_intf * intf, int argc, char ** argv)
 {
-	int i;
 	struct ipmi_rs * rsp;
 	struct ipmi_rq req;
 
@@ -959,23 +1459,92 @@ ipmi_picmg_set_power_level(struct ipmi_intf * intf, int argc, char ** argv)
 	req.msg.data_len = 4;
 
 	msg_data[0] = 0x00;					/* PICMG identifier	 */
-	msg_data[1] = atoi(argv[0]);				/* FRU-ID		 */
-	msg_data[2] = atoi(argv[1]);				/* power level		 */
-	msg_data[3] = atoi(argv[2]);				/* present to desired */
+	if (is_fru_id(argv[0], &msg_data[1]) != 0) {
+		return (-1);
+	}
+	/* PICMG Power Level - <0x00..0x14>, [0xFF] */
+	if (str2uchar(argv[1], &msg_data[2]) != 0
+			|| (msg_data[2] > 0x14 && msg_data[2] != 0xFF)) {
+		lprintf(LOG_ERR,
+				"Given PICMG Power Level '%s' is invalid.",
+				argv[1]);
+		return (-1);
+	}
+	/* PICMG Present-to-desired - <0..1> */
+	if (str2uchar(argv[2], &msg_data[3]) != 0 || msg_data[3] > 1) {
+		lprintf(LOG_ERR,
+				"Given PICMG Present-to-desired '%s' is invalid.",
+				argv[2]);
+		return (-1);
+	}
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "Power level set failed with CC code 0x%02x", rsp->ccode);
 		return -1;
 	}
 
 	return 0;
+}
+
+int
+ipmi_picmg_bused_resource(struct ipmi_intf * intf, t_picmg_bused_resource_mode mode)
+{
+	struct ipmi_rs * rsp;
+	struct ipmi_rq req;
+
+	unsigned char msg_data[6];
+	memset(&req, 0, sizeof(req));
+
+   int status = 0;
+   switch ( mode ) {
+      case PICMG_BUSED_RESOURCE_SUMMARY:
+      {
+         t_picmg_busres_resource_id resource;
+         t_picmg_busres_board_cmd_types cmd =PICMG_BUSRES_BOARD_CMD_QUERY;
+
+         req.msg.netfn	  = IPMI_NETFN_PICMG;
+         req.msg.cmd	     = PICMG_BUSED_RESOURCE_CMD;
+         req.msg.data	  = msg_data;
+         req.msg.data_len = 3;
+
+         /* IF BOARD
+            query for all resources
+         */
+         for( resource=PICMG_BUSRES_METAL_TEST_BUS_1;resource<=PICMG_BUSRES_SYNC_CLOCK_GROUP_3;resource+=(t_picmg_busres_resource_id)1 ) {
+            msg_data[0] = 0x00;					/* PICMG identifier */
+            msg_data[1] = (unsigned char) cmd;
+            msg_data[2] = (unsigned char) resource;
+            rsp = intf->sendrecv(intf, &req);
+
+            if (!rsp) {
+               printf("bused resource control: no response\n");
+               return -1;
+            }
+
+            if (rsp->ccode) {
+               printf("bused resource control: returned CC code 0x%02x\n", rsp->ccode);
+               return -1;
+            } else {
+               printf("Resource 0x%02x '%-26s' : 0x%02x [%s] \n" , 
+                       resource, val2str(resource,picmg_busres_id_vals),
+                       rsp->data[1], oemval2str(cmd,rsp->data[1],
+                      picmg_busres_board_status_vals));
+            }
+         }
+      }
+      break;
+      default :
+      break;
+   }
+
+   return status;
 }
 
 int
@@ -994,21 +1563,32 @@ ipmi_picmg_fru_control(struct ipmi_intf * intf, int argc, char ** argv)
 	req.msg.data_len = 3;
 
 	msg_data[0] = 0x00;					/* PICMG identifier */
-	msg_data[1] = atoi(argv[0]);				/* FRU-ID	  */
-	msg_data[2] = atoi(argv[1]);				/* control option  */
+	if (is_fru_id(argv[0], &msg_data[1]) != 0) {
+		return (-1);
+	}
+	/* FRU Control Option, valid range: <0..4> */
+	if (str2uchar(argv[1], &msg_data[2]) != 0 || msg_data[2] > 4) {
+		lprintf(LOG_ERR,
+				"Given FRU Control Option '%s' is invalid.",
+				argv[1]);
+		return (-1);
+	}
 
-	printf("0: 0x%02x   1: 0x%02x\n\r", msg_data[1], msg_data[2]);
+	printf("FRU Device Id: %d FRU Control Option: %s\n", msg_data[1],  \
+				val2str( msg_data[2], picmg_frucontrol_vals));
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("frucontrol: no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
-		printf("frucontrol: returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "frucontrol failed with CC code 0x%02x", rsp->ccode);
 		return -1;
+	} else {
+      printf("frucontrol: ok\n");
 	}
 
 
@@ -1018,9 +1598,9 @@ ipmi_picmg_fru_control(struct ipmi_intf * intf, int argc, char ** argv)
 
 
 int
-ipmi_picmg_clk_get(struct ipmi_intf * intf, int argc, char ** argv)
+ipmi_picmg_clk_get(struct ipmi_intf * intf, uint8_t clk_id, int8_t clk_res,
+		int mode)
 {
-	int i;
 	struct ipmi_rs * rsp;
 	struct ipmi_rq req;
 
@@ -1034,48 +1614,86 @@ ipmi_picmg_clk_get(struct ipmi_intf * intf, int argc, char ** argv)
 	req.msg.netfn = IPMI_NETFN_PICMG;
 	req.msg.cmd   = PICMG_AMC_GET_CLK_STATE_CMD;
 	req.msg.data  = msg_data;
-	req.msg.data_len = 2;
 
 	msg_data[0] = 0x00;									/* PICMG identifier	 */
-	msg_data[1] = atoi(argv[0]);						/* clk id				 */
+	msg_data[1] = clk_id;
 
-	if(argc>2){
-		msg_data[2] = atoi(argv[1]);					/* resource id			 */
-		req.msg.data_len = 3;
+	if(clk_res == -1 || PicmgCardType != PICMG_CARD_TYPE_ATCA ){
+		req.msg.data_len = 2;	/* for amc only channel */
+	}else{
+		req.msg.data_len = 3;	/* for carrier channel and device */
+      msg_data[2] = clk_res;
 	}
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
-	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+	if (rsp->ccode && (mode == PICMG_EKEY_MODE_QUERY) ) {
+		lprintf(LOG_ERR, "Clk get failed with CC code 0x%02x", rsp->ccode);
 		return -1;
 	}
 
-	enabled	 = (rsp->data[1]&0x8)!=0;
-	direction = (rsp->data[1]&0x4)!=0;
+	if (rsp->ccode == 0 ) {
+		enabled	 = (rsp->data[1]&0x8)!=0;
+		direction = (rsp->data[1]&0x4)!=0;
 
-	printf("CLK setting: 0x%02x\n", rsp->data[1]);
-	printf(" - state:     %s\n", (enabled)?"enabled":"disabled");
-	printf(" - direction: %s\n", (direction)?"Source":"Receiver");
-	printf(" - PLL ctrl:  0x%x\n", rsp->data[1]&0x3);
+		if
+		( 
+			mode == PICMG_EKEY_MODE_QUERY
+ 			||
+ 			mode == PICMG_EKEY_MODE_PRINT_ALL
+ 			||
+ 			(
+ 				mode == PICMG_EKEY_MODE_PRINT_DISABLED
+ 				&&
+ 				enabled == 0
+ 			)
+ 			||
+ 			(
+ 				mode == PICMG_EKEY_MODE_PRINT_ENABLED
+ 				&&
+ 				enabled == 1
+         )	
+		) {
+			if( PicmgCardType != PICMG_CARD_TYPE_AMC ) {
+				printf("CLK resource id   : %3d [ %s ]\n", clk_res ,
+					oemval2str( ((clk_res>>6)&0x03), (clk_res&0x0F),
+														picmg_clk_resource_vals));				
+			} else {
+				printf("CLK resource id   : N/A [ AMC Module ]\n");
+				clk_res = 0x40; /* Set */
+			} 
+         printf("CLK id            : %3d [ %s ]\n", clk_id,
+					oemval2str( ((clk_res>>6)&0x03), clk_id ,
+														picmg_clk_id_vals));				
 
-   if(enabled){
-      unsigned long freq = 0;
-      freq = (  rsp->data[5] <<  0
-              | rsp->data[6] <<  8
-              | rsp->data[7] << 16
-              | rsp->data[8] << 24 );
-      printf("  - Index:  %d\n", rsp->data[2]);
-      printf("  - Family: %d\n", rsp->data[3]);
-      printf("  - AccLVL: %d\n", rsp->data[4]);
-      printf("  - Freq:   %d\n", freq);
-   }
 
+			printf("CLK setting       : 0x%02x\n", rsp->data[1]);
+			printf(" - state:     %s\n", (enabled)?"enabled":"disabled");
+			printf(" - direction: %s\n", (direction)?"Source":"Receiver");
+			printf(" - PLL ctrl:  0x%x\n", rsp->data[1]&0x3);
+
+		   if(enabled){
+		      unsigned long freq = 0;
+		      freq = (  rsp->data[5] <<  0
+		              | rsp->data[6] <<  8
+		              | rsp->data[7] << 16
+		              | rsp->data[8] << 24 );
+		      printf("  - Index:  %3d\n", rsp->data[2]);
+		      printf("  - Family: %3d [ %s ] \n", rsp->data[3], 
+						val2str( rsp->data[3], picmg_clk_family_vals));
+		      printf("  - AccLVL: %3d [ %s ] \n", rsp->data[4], 
+						oemval2str( rsp->data[3], rsp->data[4],
+											picmg_clk_accuracy_vals));
+		
+		      printf("  - Freq:   %ld\n", freq);
+		   }
+		}
+	}
 	return 0;
 }
 
@@ -1083,54 +1701,69 @@ ipmi_picmg_clk_get(struct ipmi_intf * intf, int argc, char ** argv)
 int
 ipmi_picmg_clk_set(struct ipmi_intf * intf, int argc, char ** argv)
 {
-	int i;
 	struct ipmi_rs * rsp;
 	struct ipmi_rq req;
 
-	unsigned char msg_data[11];
-	unsigned long freq=0;
+	unsigned char msg_data[11] = {0};
+	uint32_t freq = 0;
 
 	memset(&req, 0, sizeof(req));
 
 	req.msg.netfn = IPMI_NETFN_PICMG;
 	req.msg.cmd	  = PICMG_AMC_SET_CLK_STATE_CMD;
 	req.msg.data  = msg_data;
-	req.msg.data_len = 11;
 
 	msg_data[0] = 0x00;									/* PICMG identifier	 */
-	msg_data[1] = strtoul(argv[0], NULL,0);				/* clk id				 */
-	msg_data[2] = strtoul(argv[1], NULL,0);				/* clk index			 */
-	msg_data[3] = strtoul(argv[2], NULL,0);				/* setting				 */
-	msg_data[4] = strtoul(argv[3], NULL,0);				/* family				 */
-	msg_data[5] = strtoul(argv[4], NULL,0);				/* acc					 */
+	if (is_clk_id(argv[0], &msg_data[1]) != 0
+			|| is_clk_index(argv[1], &msg_data[2]) != 0
+			|| is_clk_setting(argv[2], &msg_data[3]) != 0
+			|| is_clk_family(argv[3], &msg_data[4]) != 0
+			|| is_clk_acc(argv[4], &msg_data[5]) != 0
+			|| is_clk_freq(argv[5], &freq) != 0) {
+		return (-1);
+	}
 
-	freq = strtoul(argv[5], NULL,0);
 	msg_data[6] = (freq >> 0)& 0xFF;		/* freq					 */
 	msg_data[7] = (freq >> 8)& 0xFF;		/* freq					 */
 	msg_data[8] = (freq >>16)& 0xFF;		/* freq					 */
 	msg_data[9] = (freq >>24)& 0xFF;		/* freq					 */
 
-	msg_data[10] = strtoul(argv[6	], NULL,0);	/* resource id			 */
+	req.msg.data_len = 10;
+   if( PicmgCardType == PICMG_CARD_TYPE_ATCA  )
+   {
+      if( argc > 7)
+      {
+         req.msg.data_len = 11;
+		 if (is_clk_resid(argv[6], &msg_data[10]) != 0) {
+			 return (-1);
+		 }
+      }
+      else
+      {
+         lprintf(LOG_ERR, "Missing resource id for atca board.");
+         return -1;
+      }
+   }
 
 #if 1
 printf("## ID:      %d\n", msg_data[1]);
 printf("## index:   %d\n", msg_data[2]);
-printf("## setting: 0x02x\n", msg_data[3]);
+printf("## setting: 0x%02x\n", msg_data[3]);
 printf("## family:  %d\n", msg_data[4]);
 printf("## acc:     %d\n", msg_data[5]);
-printf("## freq:    %d\n", freq );
+printf("## freq:    %ld\n", freq );
 printf("## res:     %d\n", msg_data[10]);
 #endif
 
 	rsp = intf->sendrecv(intf, &req);
 
 	if (!rsp) {
-		printf("no response\n");
+		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
 	}
 
 	if (rsp->ccode) {
-		printf("returned CC code 0x%02x\n", rsp->ccode);
+		lprintf(LOG_ERR, "Clk set failed with CC code 0x%02x", rsp->ccode);
 		return -1;
 	}
 
@@ -1145,41 +1778,48 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 	int rc = 0;
 	int showProperties = 0;
 
+	if (argc == 0 || (!strncmp(argv[0], "help", 4))) {
+		ipmi_picmg_help();
+		return 0;
+	}
+
 	/* Get PICMG properties is called to obtain version information */
 	if (argc !=0 && !strncmp(argv[0], "properties", 10)) {
 		showProperties =1;
 	}
 	rc = ipmi_picmg_properties(intf,showProperties);
 
-	if (argc == 0 || (!strncmp(argv[0], "help", 4))) {
-		ipmi_picmg_help();
-		return 0;
-	}
-
 	/* address info command */
-	else if (!strncmp(argv[0], "addrinfo", 8)) {
+	if (!strncmp(argv[0], "addrinfo", 8)) {
 		rc = ipmi_picmg_getaddr(intf, argc-1, &argv[1]);
 	}
-
+	else if (!strncmp(argv[0], "busres", 6)) {
+		if (argc > 1) {
+			if (!strncmp(argv[1], "summary", 7)) {
+				ipmi_picmg_bused_resource(intf, PICMG_BUSED_RESOURCE_SUMMARY );
+			}
+		} else {
+			lprintf(LOG_NOTICE, "usage: busres summary");
+      }
+	}
 	/* fru control command */
 	else if (!strncmp(argv[0], "frucontrol", 10)) {
 		if (argc > 2) {
 			rc = ipmi_picmg_fru_control(intf, argc-1, &(argv[1]));
 		}
 		else {
-			printf("usage: frucontrol <FRU-ID> <OPTION>\n");
-			printf("   OPTION:\n");
-			printf("      0x00      - Cold Reset\n");
-			printf("      0x01      - Warm Reset\n");
-			printf("      0x02      - Graceful Reboot\n");
-			printf("      0x03      - Issue Diagnostic Interrupt\n");
-			printf("      0x04      - Quiesce [AMC only]\n");
-			printf("      0x05-0xFF - Cold Reset\n");
+			lprintf(LOG_NOTICE, "usage: frucontrol <FRU-ID> <OPTION>");
+			lprintf(LOG_NOTICE, "   OPTION:");
+			lprintf(LOG_NOTICE, "      0      - Cold Reset");
+			lprintf(LOG_NOTICE, "      1      - Warm Reset");
+			lprintf(LOG_NOTICE, "      2      - Graceful Reboot");
+			lprintf(LOG_NOTICE, "      3      - Issue Diagnostic Interrupt");
+			lprintf(LOG_NOTICE, "      4      - Quiesce [AMC only]");
+			lprintf(LOG_NOTICE, "      5-255  - Reserved");
 
 			return -1;
 		}
 
-		printf("frucontrol\n\r");
 	}
 
 	/* fru activation command */
@@ -1188,7 +1828,7 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 			rc = ipmi_picmg_fru_activation(intf, argc-1, &(argv[1]), PICMG_FRU_ACTIVATE);
 		}
 		else {
-			printf("specify the FRU to activate\n");
+			lprintf(LOG_ERR, "Specify the FRU to activate.");
 			return -1;
 		}
 	}
@@ -1198,7 +1838,7 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 		if (argc > 1) {
 			rc = ipmi_picmg_fru_activation(intf, argc-1, &(argv[1]), PICMG_FRU_DEACTIVATE);
 		}else {
-			printf("specify the FRU to deactivate\n");
+			lprintf(LOG_ERR, "Specify the FRU to deactivate.");
 			return -1;
 		}
 	}
@@ -1210,25 +1850,28 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 				if (argc > 2) {
 					rc = ipmi_picmg_fru_activation_policy_get(intf, argc-1, &(argv[2]));
 				} else {
-					printf("usage: get <fruid>\n");
+					lprintf(LOG_NOTICE, "usage: get <fruid>");
 				}
 			} else if (!strncmp(argv[1], "set", 3)) {
 				if (argc > 4) {
 					rc = ipmi_picmg_fru_activation_policy_set(intf, argc-1, &(argv[2]));
 				} else {
-					printf("usage: set <fruid> <lockmask> <lock>\n");
-					printf("    lockmask:  [1] affect the deactivation locked bit\n");
-					printf("               [0] affect the activation locked bit\n");
-					printf("    lock:      [1] set/clear deactivation locked\n");
-					printf("               [0] set/clear locked \n");
+					lprintf(LOG_NOTICE, "usage: set <fruid> <lockmask> <lock>");
+					lprintf(LOG_NOTICE,
+							"    lockmask:  [1] affect the deactivation locked bit");
+					lprintf(LOG_NOTICE,
+							"               [0] affect the activation locked bit");
+					lprintf(LOG_NOTICE,
+							"    lock:      [1] set/clear deactivation locked");
+					lprintf(LOG_NOTICE, "               [0] set/clear locked");
 				}
 			}
 			else {
-				printf("specify fru\n");
+				lprintf(LOG_ERR, "Specify FRU.");
 				return -1;
 			}
 		} else {
-			printf("wrong parameters\n");
+			lprintf(LOG_ERR, "Wrong parameters.");
 			return -1;
 		}
 	}
@@ -1240,9 +1883,8 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 
 		if (argc > 1) {
 			if (!strncmp(argv[1], "get", 3)) {
-
-				int iface;
-				int channel;
+				int32_t iface;
+				uint8_t channel = 0;
 
 				lprintf(LOG_DEBUG,"PICMG: get");
 
@@ -1275,27 +1917,38 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 					}
 				}
 				else if (argc > 3){
-					iface     = atoi(argv[2]);
-					channel   = atoi(argv[3]);
+					if (is_amc_intf(argv[2], &iface) != 0
+							|| is_amc_channel(argv[3], &channel) != 0) {
+						return (-1);
+					}
 					lprintf(LOG_DEBUG,"PICMG: requesting interface %d",iface);
 					lprintf(LOG_DEBUG,"PICMG: requesting channel %d",channel);
-	
+
 					rc = ipmi_picmg_portstate_get(intf,iface,channel,
 					            PICMG_EKEY_MODE_QUERY );
 				}
 				else {
-					printf("<intf> <chn>|getall|getgranted|getdenied\n");
+					lprintf(LOG_NOTICE, "<intf> <chn>|getall|getgranted|getdenied");
 				}
 			}
 			else if (!strncmp(argv[1], "set", 3)) {
 					if (argc == 9) {
-						int interface = strtoul(argv[2], NULL, 0);
-						int channel   = strtoul(argv[3], NULL, 0);
-						int port      = strtoul(argv[4], NULL, 0);
-						int type      = strtoul(argv[5], NULL, 0);
-						int typeext   = strtoul(argv[6], NULL, 0);
-						int group     = strtoul(argv[7], NULL, 0);
-						int enable    = strtoul(argv[8], NULL, 0);
+						int32_t interface = 0;
+						int32_t port = 0;
+						uint8_t channel = 0;
+						uint8_t enable = 0;
+						uint8_t group = 0;
+						uint8_t type = 0;
+						uint8_t typeext = 0;
+						if (is_amc_intf(argv[2], &interface) != 0
+								|| is_amc_channel(argv[3], &channel) != 0
+								|| is_amc_port(argv[4], &port) != 0
+								|| is_link_type(argv[5], &type) != 0
+								|| is_link_type_ext(argv[6], &typeext) != 0
+								|| is_link_group(argv[7], &group) != 0
+								|| is_enable(argv[8], &enable) != 0) {
+							return (-1);
+						}
 
 						lprintf(LOG_DEBUG,"PICMG: interface %d",interface);
 						lprintf(LOG_DEBUG,"PICMG: channel %d",channel);
@@ -1305,17 +1958,18 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 						lprintf(LOG_DEBUG,"PICMG: group %d",group);
 						lprintf(LOG_DEBUG,"PICMG: enable %d",enable);
 
-						rc = ipmi_picmg_portstate_set(intf, interface, 
+						rc = ipmi_picmg_portstate_set(intf, interface,
 						    channel, port, type, typeext  ,group ,enable);
 					}
 					else {
-						printf("<intf> <chn> <port> <type> <ext> <group> <1|0>\n");
+						lprintf(LOG_NOTICE,
+								"<intf> <chn> <port> <type> <ext> <group> <1|0>");
 						return -1;
 					}
 			}
 		}
 		else {
-			printf("<set>|<getall>|<getgranted>|<getdenied>\n");
+			lprintf(LOG_NOTICE, "<set>|<getall>|<getgranted>|<getdenied>");
 			return -1;
 		}
 	}
@@ -1326,14 +1980,14 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 
 		if (argc > 1) {
 			if (!strncmp(argv[1], "get", 3)){
-				int channel;
-				int device;
+				int32_t device;
+				uint8_t channel;
 
 				lprintf(LOG_DEBUG,"PICMG: get");
 
 				if(!strncmp(argv[1], "getall", 6)){
 					int maxDevice = PICMG_EKEY_AMC_MAX_DEVICE;
-					if( PicmgExtMajorVersion != 2){
+					if( PicmgCardType != PICMG_CARD_TYPE_ATCA ){
 						maxDevice = 0;
 					}
 					for(device=0;device<=maxDevice;device++){
@@ -1345,7 +1999,7 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 				}
 				else if(!strncmp(argv[1], "getgranted", 10)){
 					int maxDevice = PICMG_EKEY_AMC_MAX_DEVICE;
-					if( PicmgExtMajorVersion != 2){
+					if( PicmgCardType != PICMG_CARD_TYPE_ATCA ){
 						maxDevice = 0;
 					}
 					for(device=0;device<=maxDevice;device++){
@@ -1357,7 +2011,7 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 				}
 				else if(!strncmp(argv[1], "getdenied", 9)){
 					int maxDevice = PICMG_EKEY_AMC_MAX_DEVICE;
-					if( PicmgExtMajorVersion != 2){
+					if( PicmgCardType != PICMG_CARD_TYPE_ATCA ){
 						maxDevice = 0;
 					}
 					for(device=0;device<=maxDevice;device++){
@@ -1368,9 +2022,13 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 					}
 				}
 				else if (argc > 2){
-					channel     = atoi(argv[2]);
+					if (is_amc_channel(argv[2], &channel) != 0) {
+						return (-1);
+					}
 					if (argc > 3){
-					device      = atoi(argv[3]);
+						if (is_amc_dev(argv[3], &device) != 0) {
+							return (-1);
+						}
 					}else{
 					   device = -1;
 				    }
@@ -1381,20 +2039,30 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
                                              PICMG_EKEY_MODE_QUERY );
 				}
 				else {
-					printf("<chn> <device>|getall|getgranted|getdenied\n");
+					lprintf(LOG_NOTICE, "<chn> <device>|getall|getgranted|getdenied");
 				}
 			}
 			else if (!strncmp(argv[1], "set", 3)) {
 				if (argc > 7) {
-					int channel  = atoi(argv[2]);
-					int port     = atoi(argv[3]);
-					int type     = atoi(argv[4]);
-					int typeext  = atoi(argv[5]);
-					int group    = atoi(argv[6]);
-					int enable   = atoi(argv[7]);
-					int device   = -1;
+					int32_t device = -1;
+					int32_t port = 0;
+					uint8_t channel = 0;
+					uint8_t enable = 0;
+					uint8_t group = 0;
+					uint8_t type = 0;
+					uint8_t typeext = 0;
+					if (is_amc_channel(argv[2], &channel) != 0
+							|| is_amc_port(argv[3], &port) != 0
+							|| is_link_type(argv[4], &type) !=0
+							|| is_link_type_ext(argv[5], &typeext) != 0
+							|| is_link_group(argv[6], &group) != 0
+							|| is_enable(argv[7], &enable) != 0) {
+						return (-1);
+					}
 					if(argc > 8){
-						device   = atoi(argv[8]);
+						if (is_amc_dev(argv[8], &device) != 0) {
+							return (-1);
+						}
 					}
 
 					lprintf(LOG_DEBUG,"PICMG: channel %d",channel);
@@ -1409,13 +2077,14 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
                                                typeext, group, enable, device);
 				}
 				else {
-				printf("<chn> <portflags> <type> <ext> <group> <1|0> [<device>]\n");
+					lprintf(LOG_NOTICE,
+							"<chn> <portflags> <type> <ext> <group> <1|0> [<device>]");
 					return -1;
 				}
 			}
 		}
 		else {
-			printf("<set>|<get>|<getall>|<getgranted>|<getdenied>\n");
+			lprintf(LOG_NOTICE, "<set>|<get>|<getall>|<getgranted>|<getdenied>");
 			return -1;
 		}
 	}
@@ -1427,7 +2096,7 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 					rc = ipmi_picmg_get_led_properties(intf, argc-1, &(argv[2]));
 				}
 				else {
-					printf("led prop <FRU-ID>\n");
+					lprintf(LOG_NOTICE, "led prop <FRU-ID>");
 				}
 			}
 			else if (!strncmp(argv[1], "cap", 3)) {
@@ -1435,7 +2104,7 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 					rc = ipmi_picmg_get_led_capabilities(intf, argc-1, &(argv[2]));
 				}
 				else {
-					printf("led cap <FRU-ID> <LED-ID>\n");
+					lprintf(LOG_NOTICE, "led cap <FRU-ID> <LED-ID>");
 				}
 			}
 			else if (!strncmp(argv[1], "get", 3)) {
@@ -1443,7 +2112,7 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 					rc = ipmi_picmg_get_led_state(intf, argc-1, &(argv[2]));
 				}
 				else {
-					printf("led get <FRU-ID> <LED-ID>\n");
+					lprintf(LOG_NOTICE, "led get <FRU-ID> <LED-ID>");
 				}
 			}
 			else if (!strncmp(argv[1], "set", 3)) {
@@ -1451,34 +2120,39 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 					rc = ipmi_picmg_set_led_state(intf, argc-1, &(argv[2]));
 				}
 				else {
-					printf("led set <FRU-ID> <LED-ID> <function> <duration> <color>\n");
-					printf("   <FRU-ID>\n");
-					printf("   <LED-ID>    0:         Blue LED\n");
-					printf("               1:         LED 1\n");
-					printf("               2:         LED 2\n");
-					printf("               3:         LED 3\n");
-					printf("               0x04-0xFE: OEM defined\n");
-					printf("               0xFF:      All LEDs under management control\n");
-					printf("   <function>  0:       LED OFF override\n");
-					printf("               1 - 250: LED blinking override (off duration)\n");
-					printf("               251:     LED Lamp Test\n");
-					printf("               252:     LED restore to local control\n");
-					printf("               255:     LED ON override\n");
-					printf("   <duration>  1 - 127: LED Lamp Test / on duration\n");
-					printf("   <color>     0:   reserved\n");
-					printf("               1:   BLUE\n");
-					printf("               2:   RED\n");
-					printf("               3:   GREEN\n");
-					printf("               4:   AMBER\n");
-					printf("               5:   ORANGE\n");
-					printf("               6:   WHITE\n");
-					printf("               7:   reserved\n");
-					printf("               0xE: do not change\n");
-					printf("               0xF: use default color\n");
+					lprintf(LOG_NOTICE,
+							"led set <FRU-ID> <LED-ID> <function> <duration> <color>");
+					lprintf(LOG_NOTICE, "   <FRU-ID>");
+					lprintf(LOG_NOTICE, "   <LED-ID>    0:         Blue LED");
+					lprintf(LOG_NOTICE, "               1:         LED 1");
+					lprintf(LOG_NOTICE, "               2:         LED 2");
+					lprintf(LOG_NOTICE, "               3:         LED 3");
+					lprintf(LOG_NOTICE, "               0x04-0xFE: OEM defined");
+					lprintf(LOG_NOTICE,
+							"               0xFF:      All LEDs under management control");
+					lprintf(LOG_NOTICE, "   <function>  0:       LED OFF override");
+					lprintf(LOG_NOTICE,
+							"               1 - 250: LED blinking override (off duration)");
+					lprintf(LOG_NOTICE, "               251:     LED Lamp Test");
+					lprintf(LOG_NOTICE,
+							"               252:     LED restore to local control");
+					lprintf(LOG_NOTICE, "               255:     LED ON override");
+					lprintf(LOG_NOTICE,
+							"   <duration>  1 - 127: LED Lamp Test / on duration");
+					lprintf(LOG_NOTICE, "   <color>     0:   reserved");
+					lprintf(LOG_NOTICE, "               1:   BLUE");
+					lprintf(LOG_NOTICE, "               2:   RED");
+					lprintf(LOG_NOTICE, "               3:   GREEN");
+					lprintf(LOG_NOTICE, "               4:   AMBER");
+					lprintf(LOG_NOTICE, "               5:   ORANGE");
+					lprintf(LOG_NOTICE, "               6:   WHITE");
+					lprintf(LOG_NOTICE, "               7:   reserved");
+					lprintf(LOG_NOTICE, "               0xE: do not change");
+					lprintf(LOG_NOTICE, "               0xF: use default color");
 				}
 			}
 			else {
-				printf("prop | cap | get | set\n");
+				lprintf(LOG_NOTICE, "prop | cap | get | set");
 			}
 		}
 	}
@@ -1490,11 +2164,12 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 					rc = ipmi_picmg_get_power_level(intf, argc-1, &(argv[2]));
 				}
 				else {
-					printf("power get <FRU-ID> <type>\n");
-					printf("   <type>   0 : steady state powert draw levels\n");
-					printf("            1 : desired steady state draw levels\n");
-					printf("            2 : early power draw levels\n");
-					printf("            3 : desired early levels\n");
+					lprintf(LOG_NOTICE, "power get <FRU-ID> <type>");
+					lprintf(LOG_NOTICE, "   <type>   0 : steady state power draw levels");
+					lprintf(LOG_NOTICE,
+							"            1 : desired steady state draw levels");
+					lprintf(LOG_NOTICE, "            2 : early power draw levels");
+					lprintf(LOG_NOTICE, "            3 : desired early levels");
 
 					return -1;
 				}
@@ -1504,39 +2179,83 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 					rc = ipmi_picmg_set_power_level(intf, argc-1, &(argv[2]));
 				}
 				else {
-					printf("power set <FRU-ID> <level> <present-desired>\n");
-					printf("   <level>  0 :        Power Off\n");
-					printf("            0x1-0x14 : Power level\n");
-					printf("            0xFF :     do not change\n");
-					printf("\n");
-					printf("   <present-desired> 0: do not change present levelsﬂn");
-					printf("                     1: copy desired to present level\n");
+					lprintf(LOG_NOTICE, "power set <FRU-ID> <level> <present-desired>");
+					lprintf(LOG_NOTICE, "   <level>  0 :        Power Off");
+					lprintf(LOG_NOTICE, "            0x1-0x14 : Power level");
+					lprintf(LOG_NOTICE, "            0xFF :     do not change");
+					lprintf(LOG_NOTICE,
+							"\n   <present-desired> 0: do not change present levels");
+					lprintf(LOG_NOTICE,
+							"                     1: copy desired to present level");
 
 					return -1;
 				}
 			}
 			else {
-				printf("<set>|<get>\n");
+				lprintf(LOG_NOTICE, "<set>|<get>");
 				return -1;
 			}
 		}
 		else {
-			printf("<set>|<get>\n");
+			lprintf(LOG_NOTICE, "<set>|<get>");
 			return -1;
 		}
 	}/* clk commands*/
 	else if (!strncmp(argv[0], "clk", 3)) {
 		if (argc > 1) {
 			if (!strncmp(argv[1], "get", 3)) {
-				if (argc > 2) {
-					unsigned char clk_id;
-					unsigned char clk_res;
+				int8_t clk_res = -1;            
+				uint8_t clk_id;
+				uint8_t max_res = 15;
 
-					rc = ipmi_picmg_clk_get(intf, argc-1, &(argv[2]));
+				if( PicmgCardType == PICMG_CARD_TYPE_AMC ) {
+					max_res = 0;
+				}
+
+				if(!strncmp(argv[1], "getall", 6)) {
+					if( verbose ) { printf("Getting all clock state\n") ;}	
+					for(clk_res=0;clk_res<=max_res;clk_res++) {
+						for(clk_id=0;clk_id<=15;clk_id++) {
+								rc = ipmi_picmg_clk_get(intf,clk_id,clk_res,
+								        PICMG_EKEY_MODE_PRINT_ALL);
+						}
+					}
+				}
+				else if(!strncmp(argv[1], "getdenied", 6)) {
+					if( verbose ) { printf("Getting disabled clocks\n") ;}	
+					for(clk_res=0;clk_res<=max_res;clk_res++) {
+						for(clk_id=0;clk_id<=15;clk_id++) {
+								rc = ipmi_picmg_clk_get(intf,clk_id,clk_res,
+								        PICMG_EKEY_MODE_PRINT_DISABLED);
+						}
+					}
+				}
+				else if(!strncmp(argv[1], "getgranted", 6)) {
+					if( verbose ) { printf("Getting enabled clocks\n") ;}	
+					for(clk_res=0;clk_res<=max_res;clk_res++) {
+						for(clk_id=0;clk_id<=15;clk_id++) {
+								rc = ipmi_picmg_clk_get(intf,clk_id,clk_res,
+								        PICMG_EKEY_MODE_PRINT_ENABLED);
+						}
+					}
+				}
+				else if (argc > 2) {
+					if (is_clk_id(argv[2], &clk_id) != 0) {
+						return (-1);
+					}
+					if (argc > 3) {
+						if (is_clk_resid(argv[3], &clk_res) != 0) {
+							return (-1);
+						}
+					}
+
+					rc = ipmi_picmg_clk_get(intf, clk_id, clk_res,
+							PICMG_EKEY_MODE_QUERY );
 				}
 				else {
-					printf("clk get <CLK-ID> [<DEV-ID>]\n");
-
+					lprintf(LOG_NOTICE, "clk get");
+					lprintf(LOG_NOTICE,
+							"<CLK-ID> [<DEV-ID>] |getall|getgranted|getdenied");
 					return -1;
 				}
 			}
@@ -1545,18 +2264,19 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 					rc = ipmi_picmg_clk_set(intf, argc-1, &(argv[2]));
 				}
 				else {
-					printf("clk set <CLK-ID> <index> <setting> <family> <acc-lvl> <freq> [<DEV-ID>] \n");
+					lprintf(LOG_NOTICE,
+							"clk set <CLK-ID> <index> <setting> <family> <acc-lvl> <freq> [<DEV-ID>]");
 
 					return -1;
 				}
 			}
 			else {
-				printf("<set>|<get>\n");
+				lprintf(LOG_NOTICE, "<set>|<get>|<getall>|<getgranted>|<getdenied>");
 				return -1;
 			}
 		}
 		else {
-			printf("<set>|<get>\n");
+			lprintf(LOG_NOTICE, "<set>|<get>|<getall>|<getgranted>|<getdenied>");
 			return -1;
 		}
 	}
@@ -1568,4 +2288,84 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 	}
 
 	return rc;
+}
+
+uint8_t
+ipmi_picmg_ipmb_address(struct ipmi_intf *intf) {
+	struct ipmi_rq req;
+	struct ipmi_rs *rsp;
+	char msg_data;
+
+	if (!intf->picmg_avail) {
+		return 0;
+	}
+	memset(&req, 0, sizeof(req));
+	req.msg.netfn = IPMI_NETFN_PICMG;
+	req.msg.cmd = PICMG_GET_ADDRESS_INFO_CMD;
+	msg_data    = 0x00;
+	req.msg.data = &msg_data;
+	req.msg.data_len = 1;
+	msg_data = 0;
+
+	rsp = intf->sendrecv(intf, &req);
+	if (rsp && !rsp->ccode) {
+		return rsp->data[2];
+	}
+	if (rsp) {
+		lprintf(LOG_DEBUG, "Get Address Info failed: %#x %s",
+			rsp->ccode, val2str(rsp->ccode, completion_code_vals));
+	} else {
+		lprintf(LOG_DEBUG, "Get Address Info failed: No Response");
+	}
+	return 0;
+}
+
+uint8_t
+picmg_discover(struct ipmi_intf *intf) {
+	/* Check if PICMG extension is available to use the function 
+	 * GetDeviceLocator to retreive i2c address PICMG hack to set 
+	 * right IPMB address, If extension is not supported, should 
+	 * not give any problems
+	 *  PICMG Extension Version 2.0 (PICMG 3.0 Revision 1.0 ATCA) to
+	 *  PICMG Extension Version 2.3 (PICMG 3.0 Revision 3.0 ATCA)
+	 *  PICMG Extension Version 4.1 (PICMG 3.0 Revision 3.0 AMC)
+	 */
+
+	/* First, check if PICMG extension is available and supported */
+	struct ipmi_rq req;
+	struct ipmi_rs *rsp;
+	char msg_data;
+
+	if (intf->picmg_avail == 0) {
+		memset(&req, 0, sizeof(req));
+		req.msg.netfn = IPMI_NETFN_PICMG;
+		req.msg.cmd = PICMG_GET_PICMG_PROPERTIES_CMD;
+		msg_data    = 0x00;
+		req.msg.data = &msg_data;
+		req.msg.data_len = 1;
+		msg_data = 0;
+
+		lprintf(LOG_DEBUG, "Running Get PICMG Properties my_addr %#x, transit %#x, target %#x",
+			intf->my_addr, intf->transit_addr, intf->target_addr);
+		rsp = intf->sendrecv(intf, &req);
+		if (rsp && !rsp->ccode) {
+			if ( (rsp->data[0] == 0) &&
+					((rsp->data[1] & 0x0F) == PICMG_ATCA_MAJOR_VERSION
+					|| (rsp->data[1] & 0x0F) == PICMG_AMC_MAJOR_VERSION) )	{
+				intf->picmg_avail = 1;
+				lprintf(LOG_DEBUG, "Discovered PICMG Extension %d.%d",
+						(rsp->data[1] & 0x0f), (rsp->data[1] >> 4));
+			}
+		} else {
+			if (rsp == NULL) {
+				lprintf(LOG_DEBUG,"No Response from Get PICMG Properties");
+			} else {
+				lprintf(LOG_DEBUG,"Error Response %#x from Get PICMG Properities", rsp->ccode);
+			}
+		}
+	}
+	if (intf->picmg_avail == 0) {
+		lprintf(LOG_DEBUG, "No PICMG Extenstion discovered");
+	}
+	return intf->picmg_avail;
 }

@@ -81,6 +81,7 @@ ipmi_bmc_close(struct ipmi_intf *intf)
 		close(intf->fd);
 
 	intf->opened = 0;
+	intf->manufacturer_id = IPMI_OEM_UNKNOWN;
 	intf->fd = -1;
 }
 
@@ -111,6 +112,7 @@ ipmi_bmc_open(struct ipmi_intf *intf)
 	sendrecv_fn = (method == BMC_PUTMSG_METHOD) ?
 	    ipmi_bmc_send_cmd_putmsg : ipmi_bmc_send_cmd_ioctl;
 
+	intf->manufacturer_id = ipmi_get_oem(intf);
 	return (intf->fd);
 }
 
@@ -216,10 +218,12 @@ ipmi_bmc_send_cmd_putmsg(struct ipmi_intf *intf, struct ipmi_rq *req)
 	if (putmsg(intf->fd, NULL, &sb, 0) < 0) {
 		perror("BMC putmsg: ");
 		free(msg);
+		msg = NULL;
 		return (NULL);
 	}
 
 	free(msg);
+	msg = NULL;
 
 	sb.buf = malloc(MESSAGE_BUFSIZE);
 	sb.maxlen = MESSAGE_BUFSIZE;
@@ -227,6 +231,7 @@ ipmi_bmc_send_cmd_putmsg(struct ipmi_intf *intf, struct ipmi_rq *req)
 	if (getmsg(intf->fd, NULL, &sb, &flags) < 0) {
 		perror("BMC getmsg: ");
 		free(sb.buf);
+		sb.buf = NULL;
 		return (NULL);
 	}
 
@@ -266,6 +271,7 @@ ipmi_bmc_send_cmd_putmsg(struct ipmi_intf *intf, struct ipmi_rq *req)
 	}
 	
 	free(sb.buf);
+	sb.buf = NULL;
 	return (ret);
 }
 

@@ -61,7 +61,10 @@
 #include <ipmitool/ipmi_kontronoem.h>
 #include <ipmitool/ipmi_firewall.h>
 #include <ipmitool/ipmi_hpmfwupg.h>
+#include <ipmitool/ipmi_delloem.h>
 #include <ipmitool/ipmi_ekanalyzer.h>
+#include <ipmitool/ipmi_ime.h>
+#include <ipmitool/ipmi_dcmi.h>
 
 #ifdef HAVE_CONFIG_H
 # include <config.h>
@@ -100,11 +103,13 @@ struct ipmi_cmd ipmitool_cmd_list[] = {
 	{ ipmi_user_main,    "user",    "Configure Management Controller users" },
 	{ ipmi_channel_main, "channel", "Configure Management Controller channels" },
 	{ ipmi_session_main, "session", "Print session information" },
+    { ipmi_dcmi_main,    "dcmi",    "Data Center Management Interface"},
 	{ ipmi_sunoem_main,  "sunoem",  "OEM Commands for Sun servers" },
 	{ ipmi_kontronoem_main, "kontronoem", "OEM Commands for Kontron devices"},
 	{ ipmi_picmg_main,   "picmg",   "Run a PICMG/ATCA extended cmd"},
 	{ ipmi_fwum_main,    "fwum",	"Update IPMC using Kontron OEM Firmware Update Manager" },
 	{ ipmi_firewall_main,"firewall","Configure Firmware Firewall" },
+	{ ipmi_delloem_main, "delloem", "OEM Commands for Dell systems" },
 #ifdef HAVE_READLINE
 	{ ipmi_shell_main,   "shell",   "Launch interactive IPMI shell" },
 #endif
@@ -113,6 +118,7 @@ struct ipmi_cmd ipmitool_cmd_list[] = {
 	{ ipmi_echo_main,    "echo",    NULL }, /* for echoing lines to stdout in scripts */
 	{ ipmi_hpmfwupg_main,"hpm", "Update HPM components using PICMG HPM.1 file"},
 	{ ipmi_ekanalyzer_main,"ekanalyzer", "run FRU-Ekeying analyzer using FRU files"},
+	{ ipmi_ime_main,          "ime", "Update Intel Manageability Engine Firmware"},
 	{ NULL },
 };
 

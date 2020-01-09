@@ -70,7 +70,7 @@ void lprintf(int level, const char * format, ...)
 	if (logpriv->daemon)
 		syslog(level, "%s", logmsg);
 	else
-		fprintf(stderr, "%s\r\n", logmsg);
+		fprintf(stderr, "%s\n", logmsg);
 	return;
 }
 
@@ -92,7 +92,7 @@ void lperror(int level, const char * format, ...)
 	if (logpriv->daemon)
 		syslog(level, "%s: %s", logmsg, strerror(errno));
 	else
-		fprintf(stderr, "%s: %s\r\n", logmsg, strerror(errno));
+		fprintf(stderr, "%s: %s\n", logmsg, strerror(errno));
 	return;
 }
 
@@ -104,7 +104,7 @@ void log_init(const char * name, int isdaemon, int verbose)
 	if (logpriv)
 		return;
 
-	logpriv = malloc(sizeof(*logpriv));
+	logpriv = malloc(sizeof(struct logpriv_s));
 	if (!logpriv)
 		return;
 
@@ -114,7 +114,7 @@ void log_init(const char * name, int isdaemon, int verbose)
 		logpriv->name = strdup(LOG_NAME_DEFAULT);
 
 	if (logpriv->name == NULL)
-		fprintf(stderr, "ipmitool: malloc failure\r\n");
+		fprintf(stderr, "ipmitool: malloc failure\n");
 	
 	logpriv->daemon = isdaemon;
 	logpriv->level = verbose + LOG_NOTICE;
@@ -132,8 +132,10 @@ void log_halt(void)
 	if (!logpriv)
 		return;
 
-	if (logpriv->name)
+	if (logpriv->name) {
 		free(logpriv->name);
+		logpriv->name = NULL;
+	}
 
 	if (logpriv->daemon)
 		closelog();
