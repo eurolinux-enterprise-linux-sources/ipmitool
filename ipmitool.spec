@@ -1,7 +1,7 @@
 Name:         ipmitool
 Summary:      Utility for IPMI control
 Version:      1.8.11
-Release:      28%{?dist}
+Release:      29%{?dist}
 License:      BSD
 Group:        System Environment/Base
 URL:          http://ipmitool.sourceforge.net/
@@ -14,7 +14,6 @@ BuildRequires: openssl-devel readline-devel ncurses-devel
 Requires(post): chkconfig
 Requires(preun): chkconfig
 Requires: net-tools
-Requires: OpenIPMI
 Requires: gettext
 Obsoletes: OpenIPMI-tools < 2.0.14-3
 Provides: OpenIPMI-tools = 2.0.14-3
@@ -158,6 +157,10 @@ fi
 %{_datadir}/ipmitool
 
 %changelog
+* Thu Oct 08 2015 Tomas Smetana <tsmetana@redhat.com> - 1.8.11-29
+- remove the redundant OpenIMPI dependency
+- resolves: rhbz#1262111
+
 * Mon Apr 20 2015 Ales Ledvinka <aledvink@redhat.com> - 1.8.11-28
 - (#1085072) Correct init paths.
 
