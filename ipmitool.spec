@@ -1,7 +1,7 @@
 Name:         ipmitool
 Summary:      Utility for IPMI control
 Version:      1.8.11
-Release:      20%{?dist}
+Release:      21%{?dist}
 License:      BSD
 Group:        System Environment/Base
 URL:          http://ipmitool.sourceforge.net/
@@ -42,6 +42,7 @@ Patch20: ipmitool-1.8.11-ipv6env.patch
 Patch21: ipmitool-1.8.14-dell13g.patch
 Patch22: ipmitool-1.8.14-unienv.patch
 Patch23: ipmitool-1.8.14-optenvre.patch
+Patch24: ipmitool-1.8.13-envarg.patch
 
 %description
 This package contains a utility for interfacing with devices that support
@@ -84,6 +85,7 @@ setting LAN configuration, and chassis power control.
 %patch21 -p1 -b .13g
 %patch22 -p0 -b .unienv
 %patch23 -p1 -b .optenvre
+%patch24 -p1 -b .envarg
 
 for f in AUTHORS ChangeLog; do
     iconv -f iso-8859-1 -t utf8 < ${f} > ${f}.utf8
@@ -149,6 +151,9 @@ fi
 %{_datadir}/ipmitool
 
 %changelog
+* Mon Sep 15 2014 Ales Ledvinka <aledvink@redhat.com> - 1.8.11-20
+- (#1028163) Fix environment variable parsing.
+
 * Mon Sep 15 2014 Ales Ledvinka <aledvink@redhat.com> - 1.8.11-20
 - (#1056581) IPv6 connectivity support.
 - (#1029529) Fix dependency for kernel module loading.
