@@ -1,0 +1,671 @@
+748073 - configurable retransmissions of IPMI requests
+826027 - ipmitool segfaults in ipmi_lanplus_send_payload
+
+Source: several upstream commits + upstream patches 3508759 and 3530784
+https://sourceforge.net/tracker/?func=detail&aid=3508759&group_id=95200&atid=610552
+(only the timeout handling part)
+https://sourceforge.net/tracker/?func=detail&aid=3530784&group_id=95200&atid=610552
+
+commit 1f68fca3325116a94e16c5781ed52bab77bbbc7d
+Author: audetjm <audetjm>
+Date:   Tue Nov 22 13:42:36 2011 +0000
+
+    - Bug in the existing code where it keeps on adding same command/seq pair
+    - Add retry / timeout options for LAN
+
+commit 7beab47d291f9a406451bf2a0b849dc836b076d2
+Author: audetjm <audetjm>
+Date:   Tue Nov 22 13:43:38 2011 +0000
+
+    - Bug in the existing code where it keeps on adding same command/seq pair
+    - Add timeout / retry to LAN
+    -- Thanks to Harshad Parbhu --
+
+commit 86fb1b04beaf83e6edaed481b54ad4a41c03bdde
+Author: stybla <stybla>
+Date:   Thu Jan 26 09:22:57 2012 +0000
+
+    Commit adds input validation for -N(timeout) and -R(retry) parameters. It
+    changes types of variables 'timeout' and 'retry' to types wich should be passed
+    to called functions.
+
+commit be844e83157dc9c0539adfbad38a338fa7336143
+Author: stybla <stybla>
+Date:   Tue Jan 24 12:14:20 2012 +0000
+
+    Commit introduces set of functions to safely convert user input to numbers.
+    These functions utilize strtol() and strtoul() to convert input and check for
+    invalid input as well as for *flows.
+    
+    Functions added: str2long(), str2ulong(), str2int(), str2short(), str2uchar();
+
+commit 5cb1891e0d4e19caf11b178a56bf3680f9b37f73
+Author: stybla <stybla>
+Date:   Thu Jan 26 14:30:53 2012 +0000
+
+    Fixes silly mistake I made in comparison in functions str2long() and
+    str2ulong() in 'lib/helper.c'.
+    
+    Fixes: end_ptr -> *end_ptr
+
+commit c166741275b4af9423b60897bdac3a256cc1c58a
+Author: stybla <stybla>
+Date:   Thu Jan 26 08:22:11 2012 +0000
+
+    Adds function str2uint() to convert from string to uint32_t with checks for valid input.
+
+commit e0ea9990c7d9880c6279a022e1e03d66dd3a71af
+Author: stybla <stybla>
+Date:   Wed Jan 25 14:57:12 2012 +0000
+
+    Adds function str2uint() to convert string to uint16_t with checks for valid input.
+
+diff -up ipmitool-1.8.11/lib/ipmi_main.c.retransmit ipmitool-1.8.11/lib/ipmi_main.c
+--- ipmitool-1.8.11/lib/ipmi_main.c.retransmit	2012-02-20 15:47:31.093588248 +0100
++++ ipmitool-1.8.11/lib/ipmi_main.c	2012-02-20 15:49:58.579831164 +0100
+@@ -73,7 +73,7 @@
+ #endif
+ 
+ #ifdef ENABLE_ALL_OPTIONS
+-# define OPTION_STRING	"I:hVvcgsEKYao:H:d:P:f:U:p:C:L:A:t:T:m:S:l:b:B:e:k:y:O:"
++# define OPTION_STRING	"I:hVvcgsEKYao:H:d:P:f:U:p:C:L:A:t:T:m:S:l:b:B:e:k:y:O:R:N:"
+ #else
+ # define OPTION_STRING	"I:hVvcH:f:U:p:d:S:"
+ #endif
+@@ -246,6 +246,8 @@ ipmi_option_usage(const char * progname,
+ 	lprintf(LOG_NOTICE, "       -l lun         Set destination lun for raw commands");
+ 	lprintf(LOG_NOTICE, "       -o oemtype     Setup for OEM (use 'list' to see available OEM types)");
+ 	lprintf(LOG_NOTICE, "       -O seloem      Use file for OEM SEL event descriptions");
++	lprintf(LOG_NOTICE, "       -N seconds     Specify timeout for lan [default=2] / lanplus [default=1] interface");
++	lprintf(LOG_NOTICE, "       -R retry       Set the number of retries for lan/lanplus interface [default=4]");
+ #endif
+ 	lprintf(LOG_NOTICE, "");
+ 
+@@ -280,6 +282,8 @@ ipmi_main(int argc, char ** argv,
+ 	uint8_t target_lun     = 0;
+ 	uint8_t my_addr = 0;
+ 	uint8_t lookupbit = 0x10;	/* use name-only lookup by default */
++	uint8_t retry = 0;
++	uint8_t timeout = 0;
+ 	int authtype = -1;
+ 	char * tmp = NULL;
+ 	char * hostname = NULL;
+@@ -543,6 +547,13 @@ ipmi_main(int argc, char ** argv,
+ 				goto out_free;
+ 			}
+ 			break;
++		/* Retry and Timeout */
++		case 'R':
++			retry = (uint8_t)strtol(optarg, NULL, 0);
++			break;
++		case 'N':
++			timeout = (uint8_t)strtol(optarg, NULL, 0); 
++			break;			
+ #endif
+ 		default:
+ 			ipmi_option_usage(progname, cmdlist, intflist);
+@@ -630,6 +641,11 @@ ipmi_main(int argc, char ** argv,
+ 	else
+ 		ipmi_intf_session_set_privlvl(intf,
+ 		      IPMI_SESSION_PRIV_ADMIN);	/* default */
++	/* Adding retry and timeout for interface that support it */
++	if (retry > 0)
++		ipmi_intf_session_set_retry(intf, (uint8_t)retry);
++	if (timeout > 0)
++		ipmi_intf_session_set_timeout(intf, (uint8_t)timeout);
+ 
+ 	ipmi_intf_session_set_lookupbit(intf, lookupbit);
+ 	ipmi_intf_session_set_sol_escape_char(intf, sol_escape_char);
+diff -up ipmitool-1.8.11/src/plugins/lan/lan.c.retransmit ipmitool-1.8.11/src/plugins/lan/lan.c
+--- ipmitool-1.8.11/src/plugins/lan/lan.c.retransmit	2009-02-25 21:38:53.000000000 +0100
++++ ipmitool-1.8.11/src/plugins/lan/lan.c	2012-02-20 15:51:34.383340058 +0100
+@@ -687,9 +687,31 @@ ipmi_lan_build_cmd(struct ipmi_intf * in
+ 	if (curr_seq >= 64)
+ 		curr_seq = 0;
+ 
+-	entry = ipmi_req_add_entry(intf, req);
+-	if (entry == NULL)
+-		return NULL;
++	// Bug in the existing code where it keeps on adding same command/seq pair 
++	// in the lookup entry list.
++	// Check if we have cmd,seq pair already in our list. As we are not changing 
++	// the seq number we have to re-use the node which has existing
++	// command and sequence number. If we add then we will have redundant node with
++	// same cmd,seq pair
++	entry = ipmi_req_lookup_entry(curr_seq, req->msg.cmd);
++	if (entry)
++	{
++		// This indicates that we have already same command and seq in list
++		// No need to add once again and we will re-use the existing node.
++		// Only thing we have to do is clear the msg_data as we create
++		// a new one below in the code for it.
++		if (entry->msg_data)
++			free(entry->msg_data);
++	}
++	else
++	{
++		// We dont have this request in the list so we can add it 
++		// to the list
++		entry = ipmi_req_add_entry(intf, req);
++		if (entry == NULL)
++			return NULL;
++	}
++	
+ 
+ 	len = req->msg.data_len + 29;
+ 	if (s->active && s->authtype)
+@@ -898,6 +920,30 @@ ipmi_lan_send_cmd(struct ipmi_intf * int
+ 		}
+ 	}
+ 
++	// We need to cleanup the existing entries from the list. Because if we 
++	// keep it and then when we send the new command and if the response is for
++	// old command it still matches it and then returns success.
++	// This is the corner case where the remote controller responds very slowly.
++	//
++	// Example: We have to send command 23 and 2d.
++	// If we send command,seq as 23,10 and if we dont get any response it will 
++	// retry 4 times with 23,10 and then come out here and indicate that there is no
++	// reponse from the remote controller and will send the next command for 
++	// ie 2d,11. And if the BMC is slow to respond and returns 23,10 then it 
++	// will match it in the list and will take response of command 23 as response 
++	// for command 2d and return success. So ideally when retries are done and 
++	// are out of this function we should be clearing the list to be safe so that
++	// we dont match the old response with new request.
++	//          [23, 10] --> BMC
++	//          [23, 10] --> BMC
++	//          [23, 10] --> BMC
++	//          [23, 10] --> BMC
++	//          [2D, 11] --> BMC
++	//                   <-- [23, 10]
++	//  here if we maintain 23,10 in the list then it will get matched and consider
++	//  23 response as response for 2D.   
++	ipmi_req_clear_entries();
++ 
+ 	return rsp;
+ }
+ 
+diff -up ipmitool-1.8.11/doc/ipmitool.1.old ipmitool-1.8.11/doc/ipmitool.1
+--- ipmitool-1.8.11/doc/ipmitool.1.old	2012-02-20 16:00:55.803731040 +0100
++++ ipmitool-1.8.11/doc/ipmitool.1	2012-02-20 16:00:14.000000000 +0100
+@@ -15,6 +15,8 @@ ipmitool [\fB\-c\fR|\fB\-h\fR|\fB\-v\fR|
+          [\fB\-o\fR <\fIoemtype\fP>]
+          [\fB\-O\fR <\fIsel oem\fP>]
+          [\fB\-e\fR <\fIesc_char\fP>]
++         [\fB\-N\fR <\fIsec\fP>]
++         [\fB\-R\fR <\fIcount\fP>]
+          <\fIcommand\fP>
+ 
+ ipmitool [\fB\-c\fR|\fB\-h\fR|\fB\-v\fR|\fB\-V\fR]
+@@ -29,6 +31,8 @@ ipmitool [\fB\-c\fR|\fB\-h\fR|\fB\-v\fR|
+          [\fB\-Y\fR|[\fB\-K\fR|\fB\-k\fR <\fIkg_key\fP>]
+          [\fB\-y\fR <\fIhex_kg_key\fP>]
+          [\fB\-e\fR <\fIesc_char\fP>]
++         [\fB\-N\fR <\fIsec\fP>]
++         [\fB\-R\fR <\fIcount\fP>]
+          <\fIcommand\fP>
+ .SH "DESCRIPTION"
+ This program lets you manage Intelligent Platform Management Interface 
+@@ -112,7 +116,11 @@ OPERATOR, ADMINISTRATOR. Default is ADMI
+ \fB\-m\fR <\fIlocal_address\fP>
+ Set the local IPMB address.  The default is 0x20 and there
+ should be no need to change it for normal operation.
+-.TP 
++.TP 
++\fB\-N\fR <\fIsec\fP>
++Specify nr. of seconds between retransmissions of lan/lanplus messages.
++Default are 2 seconds for lan and 1 seconds for lanplus interfaces.
++.TP 
+ \fB\-o\fR <\fIoemtype\fP>
+ Select OEM type to support.  This usually involves minor hacks
+ in place in the code to work around quirks in various BMCs from
+@@ -132,6 +140,9 @@ If supported it will be obscured in the
+ \fBNote!\fR Specifying the password as a command line
+ option is not recommended.
+ .TP 
++\fB\-R\fR <\fIcount\fP>
++Set the number of retries for lan/lanplus interface (default=4).
++.TP 
+ \fB\-S\fR <\fIsdr_cache_file\fP>
+ Use local file for remote SDR cache.  Using a local SDR cache
+ can drastically increase performance for commands that require
+
+diff -up ipmitool-1.8.11/src/plugins/lanplus/lanplus.c.retransmit2 ipmitool-1.8.11/src/plugins/lanplus/lanplus.c
+--- ipmitool-1.8.11/src/plugins/lanplus/lanplus.c.retransmit2	2012-05-30 12:51:26.125116071 +0200
++++ ipmitool-1.8.11/src/plugins/lanplus/lanplus.c	2012-05-30 12:51:20.943204724 +0200
+@@ -2087,10 +2087,15 @@ ipmi_lanplus_send_payload(
+ 	int                   try = 0;
+ 	int                   xmit = 1;
+ 	time_t                ltime;
++	uint32_t              timeout;
+ 
+ 	if (!intf->opened && intf->open && intf->open(intf) < 0)
+ 		return NULL;
+-
++	/*
++	 * The session timeout is initialized in the above interface open,
++	 * so it will only be valid after the open completes.
++	 */
++	timeout = session->timeout;
+ 	while (try < session->retry) {
+ 		ltime = time(NULL);
+ 
+@@ -2273,21 +2278,19 @@ ipmi_lanplus_send_payload(
+ 				break;
+ 		}
+ 
+-		xmit = ((time(NULL) - ltime) >= intf->session->timeout);
++		/* only timeout if time exceeds the timeout value */
++		xmit = ((time(NULL) - ltime) > timeout);
+ 
+ 		usleep(5000);
+ 
+ 		if (xmit) {
+-			/* incremet session timeout each retry */
+-			intf->session->timeout++;
++			/* increment session timeout by 1 second each retry */
++			timeout++;
+ 		}
+ 
+ 		try++;
+ 	}
+ 
+-	/* Reset timeout after retry loop completes */
+-	intf->session->timeout = IPMI_LAN_TIMEOUT;
+-
+ 	/* IPMI messages are deleted under ipmi_lan_poll_recv() */
+ 	switch (payload->payload_type) {
+ 	case IPMI_PAYLOAD_TYPE_RMCP_OPEN_REQUEST:
+
+commit 86fb1b04beaf83e6edaed481b54ad4a41c03bdde
+Author: stybla <stybla>
+Date:   Thu Jan 26 09:22:57 2012 +0000
+
+    Commit adds input validation for -N(timeout) and -R(retry) parameters. It
+    changes types of variables 'timeout' and 'retry' to types wich should be passed
+    to called functions.
+
+diff --git a/lib/ipmi_main.c b/lib/ipmi_main.c
+index 7432c44..3596206 100644
+--- a/lib/ipmi_main.c
++++ b/lib/ipmi_main.c
+@@ -367,8 +367,8 @@ ipmi_main(int argc, char ** argv,
+ 	uint8_t target_lun     = 0;
+ 	uint8_t my_addr = 0;
+ 	uint8_t lookupbit = 0x10;	/* use name-only lookup by default */
+-	uint8_t retry = 0;
+-	uint8_t timeout = 0;
++	int retry = 0;
++	uint32_t timeout = 0;
+ 	int authtype = -1;
+ 	char * tmp = NULL;
+ 	char * hostname = NULL;
+@@ -549,10 +549,19 @@ ipmi_main(int argc, char ** argv,
+ 			break;
+ 		/* Retry and Timeout */
+ 		case 'R':
+-			retry = (uint8_t)strtol(optarg, NULL, 0);
++			if (str2int(optarg, &retry) != 0 || retry < 0) {
++				lprintf(LOG_ERR, "Invalid parameter given or out of range for '-R'.");
++				rc = -1;
++				goto out_free;
++			}
+ 			break;
+ 		case 'N':
+-			timeout = (uint8_t)strtol(optarg, NULL, 0); 
++			timeout = (uint8_t)strtol(optarg, NULL, 0);
++			if (str2uint(optarg, &timeout) != 0) {
++				lprintf(LOG_ERR, "Invalid parameter given or out of range for '-N'.");
++				rc = -1;
++				goto out_free;
++			}
+ 			break;			
+ #endif
+ 		default:
+@@ -643,9 +652,9 @@ ipmi_main(int argc, char ** argv,
+ 		      IPMI_SESSION_PRIV_ADMIN);	/* default */
+ 	/* Adding retry and timeout for interface that support it */
+ 	if (retry > 0)
+-		ipmi_intf_session_set_retry(intf, (uint8_t)retry);
++		ipmi_intf_session_set_retry(intf, retry);
+ 	if (timeout > 0)
+-		ipmi_intf_session_set_timeout(intf, (uint8_t)timeout);
++		ipmi_intf_session_set_timeout(intf, timeout);
+ 
+ 	ipmi_intf_session_set_lookupbit(intf, lookupbit);
+ 	ipmi_intf_session_set_sol_escape_char(intf, sol_escape_char);
+commit be844e83157dc9c0539adfbad38a338fa7336143
+Author: stybla <stybla>
+Date:   Tue Jan 24 12:14:20 2012 +0000
+
+    Commit introduces set of functions to safely convert user input to numbers.
+    These functions utilize strtol() and strtoul() to convert input and check for
+    invalid input as well as for *flows.
+    
+    Functions added: str2long(), str2ulong(), str2int(), str2short(), str2uchar();
+
+diff --git a/include/ipmitool/helper.h b/include/ipmitool/helper.h
+index 7033766..ed9cb07 100644
+--- a/include/ipmitool/helper.h
++++ b/include/ipmitool/helper.h
+@@ -64,6 +64,13 @@ struct oemvalstr {
+ 
+ const char * val2str(uint16_t val, const struct valstr * vs);
+ const char * oemval2str(uint32_t oem,uint16_t val, const struct oemvalstr * vs);
++
++int str2long(const char * str, int64_t * lng_ptr);
++int str2ulong(const char * str, uint64_t * ulng_ptr);
++int str2int(const char * str, int32_t * int_ptr);
++int str2short(const char * str, int16_t * shrt_ptr);
++int str2uchar(const char * str, uint8_t * uchr_ptr);
++
+ uint16_t str2val(const char * str, const struct valstr * vs);
+ void print_valstr(const struct valstr * vs, const char * title, int loglevel);
+ void print_valstr_2col(const struct valstr * vs, const char * title, int loglevel);
+diff --git a/lib/helper.c b/lib/helper.c
+index 2f68102..e258609 100644
+--- a/lib/helper.c
++++ b/lib/helper.c
+@@ -35,6 +35,7 @@
+ #include <sys/ioctl.h>  /* For TIOCNOTTY */
+ 
+ #include <stdlib.h>
++#include <stdint.h>
+ #include <stdio.h>
+ #include <inttypes.h>
+ #include <signal.h>
+@@ -144,6 +145,132 @@ const char * oemval2str(uint32_t oem, uint16_t val,
+ 	return un_str;
+ }
+ 
++/* str2long - safely convert string to int64_t
++ *
++ * @str: source string to convert from
++ * @lng_ptr: pointer where to store result
++ *
++ * returns zero on success
++ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
++ */
++int str2long(const char * str, int64_t * lng_ptr)
++{
++	char * end_ptr = 0;
++	if (!str || !lng_ptr)
++		return (-1);
++
++	*lng_ptr = 0;
++	errno = 0;
++	*lng_ptr = strtol(str, &end_ptr, 0);
++
++	if (end_ptr != '\0')
++		return (-2);
++
++	if (errno != 0)
++		return (-3);
++	
++	return 0;
++} /* str2long(...) */
++
++/* str2ulong - safely convert string to uint64_t
++ *
++ * @str: source string to convert from
++ * @ulng_ptr: pointer where to store result
++ *
++ * returns zero on success
++ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
++ */
++int str2ulong(const char * str, uint64_t * ulng_ptr)
++{
++	char * end_ptr = 0;
++	if (!str || !ulng_ptr)
++		return (-1);
++
++	*ulng_ptr = 0;
++	errno = 0;
++	*ulng_ptr = strtoul(str, &end_ptr, 0);
++
++	if (end_ptr != '\0')
++		return (-2);
++
++	if (errno != 0)
++		return (-3);
++
++	return 0;
++} /* str2ulong(...) */
++
++/* str2int - safely convert string to int32_t
++ *
++ * @str: source string to convert from
++ * @int_ptr: pointer where to store result
++ *
++ * returns zero on success
++ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
++ */
++int str2int(const char * str, int32_t * int_ptr)
++{
++	int rc = 0;
++	int64_t arg_long = 0;
++	if ( (rc = str2long(str, &arg_long)) != 0 ) {
++		*int_ptr = 0;
++		return rc;
++	}
++
++	if (arg_long < INT32_MIN || arg_long > INT32_MAX)
++		return (-3);
++
++	*int_ptr = (int32_t)arg_long;
++	return 0;
++} /* str2int(...) */
++
++/* str2short - safely convert string to int16_t
++ *
++ * @str: source string to convert from
++ * @shrt_ptr: pointer where to store result
++ *
++ * returns zero on success
++ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
++ */
++int str2short(const char * str, int16_t * shrt_ptr)
++{
++	int rc = (-3);
++	int64_t arg_long = 0;
++	if ( (rc = str2long(str, &arg_long)) != 0 ) {
++		*shrt_ptr = 0;
++		return rc;
++	}
++
++	if (arg_long < INT16_MIN || arg_long > INT16_MAX)
++		return (-3);
++
++	*shrt_ptr = (int16_t)arg_long;
++	return 0;
++} /* str2short(...) */
++
++/* str2uchar - safely convert string to uint8
++ *
++ * @str: source string to convert from
++ * @uchr_ptr: pointer where to store result
++ *
++ * returns zero on success
++ * returns (-1) if one of args is NULL, (-2) or (-3) if conversion fails
++ */
++int str2uchar(const char * str, uint8_t * uchr_ptr)
++{
++	int rc = (-3);
++	int64_t arg_long = 0;
++	if ( (rc = str2ulong(str, &arg_long)) != 0 ) {
++		*uchr_ptr = 0;
++		return rc;
++	}
++
++	if (arg_long > UINT8_MAX)
++		return (-3);
++
++	*uchr_ptr = (uint8_t)arg_long;
++	return 0;
++} /* str2uchar(...) */
++
+ uint16_t str2val(const char *str, const struct valstr *vs)
+ {
+ 	int i;
+commit 5cb1891e0d4e19caf11b178a56bf3680f9b37f73
+Author: stybla <stybla>
+Date:   Thu Jan 26 14:30:53 2012 +0000
+
+    Fixes silly mistake I made in comparison in functions str2long() and
+    str2ulong() in 'lib/helper.c'.
+    
+    Fixes: end_ptr -> *end_ptr
+
+diff --git a/lib/helper.c b/lib/helper.c
+index 1fcd2e0..fb10770 100644
+--- a/lib/helper.c
++++ b/lib/helper.c
+@@ -163,7 +163,7 @@ int str2long(const char * str, int64_t * lng_ptr)
+ 	errno = 0;
+ 	*lng_ptr = strtol(str, &end_ptr, 0);
+ 
+-	if (end_ptr != '\0')
++	if (*end_ptr != '\0')
+ 		return (-2);
+ 
+ 	if (errno != 0)
+@@ -190,7 +190,7 @@ int str2ulong(const char * str, uint64_t * ulng_ptr)
+ 	errno = 0;
+ 	*ulng_ptr = strtoul(str, &end_ptr, 0);
+ 
+-	if (end_ptr != '\0')
++	if (*end_ptr != '\0')
+ 		return (-2);
+ 
+ 	if (errno != 0)
+commit c166741275b4af9423b60897bdac3a256cc1c58a
+Author: stybla <stybla>
+Date:   Thu Jan 26 08:22:11 2012 +0000
+
+    Adds function str2uint() to convert from string to uint32_t with checks for valid input.
+
+diff --git a/lib/helper.c b/lib/helper.c
+index 85cbe56..1fcd2e0 100644
+--- a/lib/helper.c
++++ b/lib/helper.c
+@@ -223,6 +223,30 @@ int str2int(const char * str, int32_t * int_ptr)
+ 	return 0;
+ } /* str2int(...) */
+ 
++/* str2uint - safely convert string to uint32_t
++ *
++ * @str: source string to convert from
++ * @uint_ptr: pointer where to store result
++ *
++ * returns zero on success
++ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
++ */
++int str2uint(const char * str, uint32_t * uint_ptr)
++{
++	int rc = 0;
++	uint64_t arg_ulong = 0;
++	if ( (rc = str2ulong(str, &arg_ulong)) != 0) {
++		*uint_ptr = 0;
++		return rc;
++	}
++
++	if (arg_ulong > UINT32_MAX)
++		return (-3);
++
++	*uint_ptr = (uint32_t)arg_ulong;
++	return 0;
++} /* str2uint(...) */
++
+ /* str2short - safely convert string to int16_t
+  *
+  * @str: source string to convert from
+commit e0ea9990c7d9880c6279a022e1e03d66dd3a71af
+Author: stybla <stybla>
+Date:   Wed Jan 25 14:57:12 2012 +0000
+
+    Adds function str2uint() to convert string to uint16_t with checks for valid input.
+
+diff --git a/lib/helper.c b/lib/helper.c
+index e258609..9bf5fe5 100644
+--- a/lib/helper.c
++++ b/lib/helper.c
+@@ -247,6 +247,30 @@ int str2short(const char * str, int16_t * shrt_ptr)
+ 	return 0;
+ } /* str2short(...) */
+ 
++/* str2ushort - safely convert string to uint16_t
++ *
++ * @str: source string to convert from
++ * @ushrt_ptr: pointer where to store result
++ *
++ * returns zero on success
++ * returns (-1) if one of args is NULL, (-2) invalid input, (-3) for *flow
++ */
++int str2ushort(const char * str, uint16_t * ushrt_ptr)
++{
++	int rc = (-3);
++	uint64_t arg_ulong = 0;
++	if ( (rc = str2ulong(str, &arg_ulong)) != 0 ) {
++		*ushrt_ptr = 0;
++		return rc;
++	}
++
++	if (arg_ulong > UINT16_MAX)
++		return (-3);
++
++	*ushrt_ptr = (uint16_t)arg_ulong;
++	return 0;
++} /* str2ushort(...) */
++
+ /* str2uchar - safely convert string to uint8
+  *
+  * @str: source string to convert from
+https://sourceforge.net/tracker/?func=detail&aid=3530784&group_id=95200&atid=610552
+Fix retransmission of lanplus requests.
+
+ipmi_lanplus_send_payload() should increment session->timeout and not a local
+variable, so ipmi_lan_poll_recv() knows about it.
+
+diff --git a/src/plugins/lanplus/lanplus.c b/src/plugins/lanplus/lanplus.c
+index e65db87..537c556 100644
+--- a/src/plugins/lanplus/lanplus.c
++++ b/src/plugins/lanplus/lanplus.c
+@@ -2090,7 +2090,7 @@ ipmi_lanplus_send_payload(
+ 	int                   try = 0;
+ 	int                   xmit = 1;
+ 	time_t                ltime;
+-	uint32_t              timeout;
++	uint32_t              saved_timeout;
+ 
+ 	if (!intf->opened && intf->open && intf->open(intf) < 0)
+ 		return NULL;
+@@ -2099,7 +2099,7 @@ ipmi_lanplus_send_payload(
+ 	 * The session timeout is initialized in the above interface open,
+ 	 * so it will only be valid after the open completes.
+ 	 */
+-	timeout = session->timeout;
++	saved_timeout = session->timeout;
+ 	while (try < session->retry) {
+ 		ltime = time(NULL);
+ 
+@@ -2295,17 +2295,18 @@ ipmi_lanplus_send_payload(
+ 		}
+ 
+ 		/* only timeout if time exceeds the timeout value */
+-		xmit = ((time(NULL) - ltime) > timeout);
++		xmit = ((time(NULL) - ltime) >= session->timeout);
+ 
+ 		usleep(5000);
+ 
+ 		if (xmit) {
+ 			/* increment session timeout by 1 second each retry */
+-			timeout++;
++			session->timeout++;
+ 		}
+ 
+ 		try++;
+ 	}
++	session->timeout = saved_timeout;
+ 
+ 	/* IPMI messages are deleted under ipmi_lan_poll_recv() */
+ 	switch (payload->payload_type) {

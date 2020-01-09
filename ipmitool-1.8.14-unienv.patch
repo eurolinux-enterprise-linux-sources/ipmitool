@@ -1,0 +1,35 @@
+diff -up lib/ipmi_main.c.al lib/ipmi_main.c
+--- lib/ipmi_main.c.al	2014-06-20 15:42:26.681929858 +0200
++++ lib/ipmi_main.c	2014-06-20 15:45:58.813285915 +0200
+@@ -482,7 +482,18 @@ ipmi_main(int argc, char ** argv,
+ 			strncpy(kgkey, optarg, IPMI_KG_BUFFER_SIZE);
+ 			break;
+ 		case 'K':
+-			if ((tmp_env = getenv("IPMI_KGKEY"))) {
++			if ((tmp_env = getenv("IPMITOOL_KGKEY"))) {
++				if (kgkey) {
++					free(kgkey);
++					kgkey = NULL;
++				}
++				kgkey = calloc(IPMI_KG_BUFFER_SIZE, 1);
++				if (kgkey == NULL) {
++					lprintf(LOG_ERR, "%s: malloc failure", progname);
++					goto out_free;
++				}
++				strncpy(kgkey, tmp_env, IPMI_KG_BUFFER_SIZE);
++            } else if ((tmp_env = getenv("IPMI_KGKEY"))) {
+ 				if (kgkey) {
+ 					free(kgkey);
+ 					kgkey = NULL;
+@@ -743,7 +754,10 @@ ipmi_main(int argc, char ** argv,
+ 
+ 		/* support additional arguments from environment */
+ 		if (argecnt == 0) {
+-			argestr = getenv("IPMITOOL_ARGV");
++			argestr = getenv("IPMITOOL_OPTS");
++			if (argestr == NULL) {
++				argestr = getenv("IPMI_OPTS");
++			}
+ 			if (argestr != NULL) {
+ 				argecnt = 0;
+ 				arge = malloc(sizeof(char*)*(argecnt+2));

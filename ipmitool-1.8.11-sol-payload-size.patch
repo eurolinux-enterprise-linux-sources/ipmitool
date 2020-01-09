@@ -1,0 +1,19 @@
+675975: ipmitool: wrong SOL input payload handling
+
+Source: taken from upstream mailing list, https://sourceforge.net/mailarchive/message.php?msg_id=27027128
+
+4-byte SOL header is part of payload size calculation.
+
+--- ipmitool-1.8.11/lib/ipmi_sol.c.sol-payload-size	2009-02-25 21:38:52.000000000 +0100
++++ ipmitool-1.8.11/lib/ipmi_sol.c	2011-07-25 13:06:30.597212774 +0200
+@@ -1537,6 +1537,10 @@ ipmi_sol_red_pill(struct ipmi_intf * int
+ 	int    keepAliveRet = 0;
+ 	int    retrySol = 0;
+ 
++	/* Subtract SOL header from max_inbound_payload_size */
++	if (buffer_size > 4)
++		buffer_size -= 4;
++
+ 	buffer = (char*)malloc(buffer_size);
+ 	if (buffer == NULL) {
+ 		lprintf(LOG_ERR, "ipmitool: malloc failure"); 

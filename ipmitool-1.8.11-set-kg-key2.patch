@@ -1,0 +1,50 @@
+656841: ipmitool: '-k' option does not set correct Kg key
+
+The delloem patch broke kgkey setting, so let's fix it here.
+ipmi_intf_session_set_kgkey() now expects that the kgkey has exactly
+20 bytes.
+
+diff -up ipmitool-1.8.11/lib/ipmi_main.c.kgkey ipmitool-1.8.11/lib/ipmi_main.c
+--- ipmitool-1.8.11/lib/ipmi_main.c.kgkey	2010-11-24 10:28:37.139963399 +0100
++++ ipmitool-1.8.11/lib/ipmi_main.c	2010-11-24 10:23:52.000000000 +0100
+@@ -382,22 +382,24 @@ ipmi_main(int argc, char ** argv,
+ 			}
+ 			break;
+ 		case 'k':
+-			kgkey = strdup(optarg);
++			kgkey = calloc(IPMI_KG_BUFFER_SIZE, 1);
+ 			if (kgkey == NULL) {
+ 				lprintf(LOG_ERR, "%s: malloc failure", progname);
+ 				goto out_free;
+ 			}
++			strncpy(kgkey, optarg, IPMI_KG_BUFFER_SIZE);
+ 			break;
+ 		case 'K':
+ 			if ((tmp = getenv("IPMI_KGKEY")))
+ 			{
+ 				if (kgkey)
+ 					free(kgkey);
+-				kgkey = strdup(tmp);
++				kgkey = calloc(IPMI_KG_BUFFER_SIZE, 1);
+ 				if (kgkey == NULL) {
+ 					lprintf(LOG_ERR, "%s: malloc failure", progname);
+ 					goto out_free;
+ 				}
++				strncpy(kgkey, tmp, IPMI_KG_BUFFER_SIZE);
+ 			}
+ 			else {
+ 				lprintf(LOG_WARN, "Unable to read kgkey from environment");
+@@ -418,11 +420,12 @@ ipmi_main(int argc, char ** argv,
+ 			if (tmp != NULL) {
+ 				if (kgkey)
+ 					free(kgkey);
+-				kgkey = strdup(tmp);
++				kgkey = calloc(IPMI_KG_BUFFER_SIZE, 1);
+ 				if (kgkey == NULL) {
+ 					lprintf(LOG_ERR, "%s: malloc failure", progname);
+ 					goto out_free;
+ 				}
++				strncpy(kgkey, tmp, IPMI_KG_BUFFER_SIZE);
+ 			}
+ 			break;
+ 		case 'U':

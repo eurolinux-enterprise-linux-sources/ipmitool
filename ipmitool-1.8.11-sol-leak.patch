@@ -1,0 +1,32 @@
+576004 - ipmitool lanplus SOL leaks memory on every SOL ack
+731977 - memory leak: 25,830 bytes in 315 blocks are definitely lost
+
+Following command leaks memory with some SOL packets (simply generate some
+activity on the console):
+
+ipmitool -I lanplus -H somehost -U root -P somepasswd sol activate 
+
+The patch below plugs the leak.
+
+Sent upstream as https://sourceforge.net/mailarchive/message.php?msg_name=20100329142345.19857.22196.stgit%40dhcp-30-141.brq.redhat.com
+
+---
+
+ src/plugins/lanplus/lanplus.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/src/plugins/lanplus/lanplus.c b/src/plugins/lanplus/lanplus.c
+index cccb4d4..09fd671 100644
+--- a/src/plugins/lanplus/lanplus.c
++++ b/src/plugins/lanplus/lanplus.c
+@@ -2293,6 +2293,7 @@ ipmi_lanplus_send_payload(
+ 	case IPMI_PAYLOAD_TYPE_RMCP_OPEN_REQUEST:
+ 	case IPMI_PAYLOAD_TYPE_RAKP_1:
+ 	case IPMI_PAYLOAD_TYPE_RAKP_3:
++	case IPMI_PAYLOAD_TYPE_SOL:
+ 		free(msg_data);
+ 		break;
+ 	}
+
+
+

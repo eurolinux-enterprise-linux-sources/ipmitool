@@ -1,0 +1,1556 @@
+739358 - [FEAT RHEL6.3]:[Dell] Upgrade DELL OEM commands to latest upstream
+
+Two upstream patches are here, backported to RHEL6
+
+commit 46baec540e6b569c5210c3c8b545fcdedba7ee42
+Author: jharg <jharg>
+Date:   Wed Sep 21 20:59:04 2011 +0000
+
+    Add Dell OEM network commands
+
+
+commit 109078fc882dbb8c1567058a32560755bffd15b7
+Author: jharg <jharg>
+Date:   Thu Oct 6 16:26:18 2011 +0000
+
+    Add new Dell OEM commands and update man page
+
+diff -up ipmitool-1.8.11/doc/ipmitool.1.dell-addons ipmitool-1.8.11/doc/ipmitool.1
+--- ipmitool-1.8.11/doc/ipmitool.1.dell-addons	2012-02-20 17:38:46.792553719 +0100
++++ ipmitool-1.8.11/doc/ipmitool.1	2012-02-20 17:38:46.801553665 +0100
+@@ -861,12 +861,26 @@ cards or two modules.
+ 
+ The delloem commands provide information on Dell-specific features.
+ .TP
+-\fIlcd\fP 
++\fIsetled {b:d.f} {state..}\fP
+ .RS
+ .br
+-\fBset {mode}\fR|
++
++Sets the drive backplane LEDs for a device.
++.br
++{b:d.f} = PCI Address of device (eg. 06:00.0)
++.br
++{state} = one or more of the following:
++.RS
++\fIonline | present | hotspare | identify | rebuilding | fault | predict | critical | failed\fP
++.br
++.RE
++.RE
++
++.TP
++\fIlcd\fP 
++.RS
+ .br
+-\fB{lcdqualifier}\fR|\fB{errordisplay}\fR
++\fIset {mode}\fP|\fI{lcdqualifier}\fP|\fI{errordisplay}\fP
+ .RS
+ .br
+ 
+@@ -876,48 +890,39 @@ Allows you to set the LCD mode and user-
+ \fIlcd set mode\fP
+ .RS
+ .br
+-\fB{none}\fR|\fB{modelname}\fR|
++\fI{none}\fP|\fI{modelname}\fP|\fI{ipv4address}\fP|\fI{macaddress}\fP|
+ .br
+-\fB{ipv4address}\fR|\fB{macaddress}\fR|
++\fI{systemname}\fP|\fI{servicetag}\fP|\fI{ipv6address}\fP|
+ .br
+-\fB{systemname}\fR|\fB{servicetag}\fR|
++\fI{ambienttemp}\fP|\fI{systemwatt}\fP|\fI{assettag}\fP|
+ .br
+-\fB{ipv6address}\fR|\fB{ambienttemp}\fR|
+-.br
+-\fB{systemwatt}\fR|\fB{assettag}\fR|
+-.br
+-\fB{userdefined}<text>\fR
+-.RS
++\fI{userdefined}<text>\fP
+ .br
+ 
+ Allows you to set the LCD display mode to any of the preceding parameters.
+-.RE
++
+ .RE
+ .TP
+ \fIlcd set lcdqualifier\fP
+ .RS
+ .br
+-\fB{watt}\fR|\fB{btuphr}\fR|
++\fI{watt}\fP|\fI{btuphr}\fP|
+ .br
+-\fB{celsius}\fR|\fB{fahrenheit}\fR
+-.RS
++\fI{celsius}\fP|\fI{fahrenheit}\fP
+ .br
+ 
+ Allows you to set the unit for the system ambient temperature mode.
+-.RE
++
+ .RE
+ .TP
+ \fIlcd set errordisplay\fP
+ .RS
+ .br
+-\fB{sel}\fR|\fB{simple}\fR
+-.RS
++\fI{sel}\fP|\fI{simple}\fP
+ .br
+ 
+ Allows you to set the error display.
+ .RE
+-.RE
+-.RE
+ .TP
+ \fIlcd info\fP
+ .RS
+@@ -928,13 +933,11 @@ Displays the LCD screen information.
+ .TP
+ \fIlcd set vkvm\fP
+ .RS
+-\fB{active}\fR|\fB{inactive}\fR
+-.RS
++\fI{active}\fP|\fI{inactive}\fP
+ .br
+ 
+ Allows you to set the vKVM status to active or inactive. When it is active and session is in progress, a message appears on LCD.
+ .RE
+-.RE
+ .TP
+ \fIlcd status\fP
+ .RS
+@@ -944,6 +947,7 @@ Displays the LCD status for vKVM display
+ 
+ .RE
+ .RE
++.RE
+ .TP
+ \fIsetled\fP
+ \fB<b:d.f> <state> [state...]\fR
+@@ -971,47 +975,52 @@ More than one state can be specified, th
+ Displays the information about the system NICs.
+ .TP
+ \fImac list\fP
+-.RS
+ .br
+ 
+ Displays the NIC MAC address and status of all NICs. It also displays the DRAC/iDRAC MAC address.
+-.RE
++
+ .TP
+ \fImac get\fP
+ .RS
+-\fB<NIC number>\fR
+-.RS
++\fI<NIC number>\fP
+ .br
+ 
+ Displays the selected NICs MAC address and status.
+ .RE
+ .RE
+-.RE
++.TP
++\fIlan\fP
++.RS
++.br 
++Displays the information of Lan.
++
+ .TP
+ \fIlan set\fP
+ .RS
+-\fB<Mode>\fR
++\fI<Mode>\fP
+ .br
+ 
+-Sets the NIC selection mode (dedicated, shared, shared with failover LOM2, shared with failover all LOMs).
++Sets the NIC selection mode (dedicated, shared with lom1, shared with lom2,shared with lom3,shared with lom4,shared with failover lom1,shared with failover lom2,shared with failover lom3,shared with failover lom4,shared with Failover all loms, shared with Failover None).
+ .RE
+ .TP
+ \fIlan get\fP
+ .br
+ 
+-Returns the current NIC selection mode (dedicated, shared, shared with failover LOM2, shared with failover all LOMs).
++Returns the current NIC selection mode (dedicated, shared with lom1, shared with lom2, shared with lom3, shared with lom4,shared with failover lom1, shared with failover lom2,shared with failover lom3,shared with failover lom4,shared with Failover all loms,shared with Failover None).
++
+ .TP
+ \fIlan get active\fP
+ .br
+ 
+ Returns the current active NIC (dedicated, LOM1, LOM2, LOM3 or LOM4).
++.RE
+ .TP
+ \fIpowermonitor\fP
+ .RS
+ .br
+ 
+ Displays power tracking statistics.
+-.RE
++
+ .TP
+ \fIpowermonitor clear cumulativepower\fP
+ .RS
+@@ -1029,48 +1038,35 @@ Reset peak power reading.
+ .TP
+ \fIpowermonitor powerconsumption\fP
+ .RS
+-\fB<watt>\fR|\fB<btuphr>\fR
+-.RS
++\fI<watt>\fP|\fI<btuphr>\fP
+ .br
+-
+ Displays the power consumption in watt or btuphr.
+ .RE
+-.RE
+ .TP
+ \fIpowermonitor powerconsumptionhistory\fP
+ .RS
+-\fB<watt>\fR|\fB<btuphr>\fR
+-.RS
++\fI<watt>\fP|\fI<btuphr>\fP
+ .br
+-
+ Displays the power consumption history in watt or btuphr.
+ .RE
+-.RE
+ .TP
+ \fIpowermonitor getpowerbudget\fP
+ .RS
+-\fB<watt>\fR|\fB<btuphr>\fR
+-.RS
++\fI<watt>\fP|\fI<btuphr>\fP
+ .br
+-
+ Displays the power cap in watt or btuphr.
+ .RE
+-.RE
+ .TP
+ \fIpowermonitor setpowerbudget\fP
+ .RS
+-\fB<val>\fR\fB<watt|btuphr|percent>\fR
+-.RS
++\fI<val>\fP\fI<watt\fP|\fIbtuphr\fP|\fIpercent>\fP
+ .br
+-
+ Allows you to set the  power cap in watt, BTU/hr or percentage.
+ .RE
+-.RE
+ .TP
+ \fIpowermonitor enablepowercap\fP
+ .RS
+ .br
+-
+ Enables set power cap.
+ .RE
+ .TP
+@@ -1081,7 +1077,35 @@ Enables set power cap.
+ Disables set power cap.
+ .RE
+ .RE
++.RE
++
++.RS
++.br
++.TP
++\fIwindbg\fP
++.RS
++.br
++\fIwindbg start\fP
++.RS
++.br
++Starts the windbg session (Cold Reset & SOL Activation)
++.RE
++\fIwindbg end\fP
++.RS
++.br
++Ends the windbg session (SOL Deactivation)
++
++.RE
++.RE
++.TP
++\fIvFlash info Card\fP
++.RS
++.br
+ 
++Shows Extended SD Card information
++.RE
++.RE
++.TP
+ .TP 
+ \fIevent\fP
+ .RS
+diff -up ipmitool-1.8.11/include/ipmitool/ipmi_delloem.h.dell-addons ipmitool-1.8.11/include/ipmitool/ipmi_delloem.h
+--- ipmitool-1.8.11/include/ipmitool/ipmi_delloem.h.dell-addons	2012-02-20 17:38:46.774553827 +0100
++++ ipmitool-1.8.11/include/ipmitool/ipmi_delloem.h	2012-02-20 17:38:46.802553659 +0100
+@@ -70,7 +70,15 @@ POSSIBILITY OF SUCH DAMAGE.
+ 
+ #define IPMI_DELL_IDRAC_VALIDATOR           0xDD    
+ #define IPMI_DELL_POWER_CAP_STATUS          0xBA   
+-
++#define IPMI_DELL_AVG_POWER_CONSMP_HST 	0xEB
++#define IPMI_DELL_PEAK_POWER_CONSMP_HST 0xEC
++#define SYSTEM_BOARD_SYSTEM_LEVEL_SENSOR_NUM 0x98
++
++#define	IDRAC_11G					1
++#define	IDRAC_12G					2
++// Return Error code for license
++#define	LICENSE_NOT_SUPPORTED		0x6F
++#define	VFL_NOT_LICENSED			0x33
+ #define btuphr              0x01
+ #define watt                0x00
+ #define IPMI_DELL_POWER_CAP 0xEA
+@@ -90,6 +98,8 @@ typedef struct _tag_ipmi_dell_lcd_caps
+ #define IPMI_DELL_LCD_STRING1_SIZE      14
+ #define IPMI_DELL_LCD_STRINGN_SIZE      16
+ 
++/* vFlash subcommands */
++#define IPMI_GET_EXT_SD_CARD_INFO 0xA4
+ 
+ 
+ typedef struct _tag_ipmi_dell_lcd_string
+@@ -176,6 +186,8 @@ typedef struct _lcd_mode
+ #define IMC_IDRAC_11G_MODULAR       (uint8_t) (0x0B)
+ #define IMC_UNUSED                  (uint8_t) (0x0C)
+ #define IMC_MASER_LITE_BMC          (uint8_t) (0x0D)
++#define IMC_IDRAC_12G_MONOLITHIC 	(uint8_t) (0x10)
++#define IMC_IDRAC_12G_MODULAR 		(uint8_t) (0x11)
+ 
+ 
+ 
+@@ -224,9 +236,17 @@ typedef struct
+ 
+ #define TOTAL_N0_NICS_INDEX         (uint8_t)(0x1)
+ 
++
++// 12g supported 
++#define SET_NIC_SELECTION_12G_CMD       (uint8_t)(0x28)
++#define GET_NIC_SELECTION_12G_CMD       (uint8_t)(0x29)
++
++// 11g supported 
+ #define SET_NIC_SELECTION_CMD       (uint8_t)(0x24)
+ #define GET_NIC_SELECTION_CMD       (uint8_t)(0x25)
+ #define GET_ACTIVE_NIC_CMD          (uint8_t)(0xc1)
++#define POWER_EFFICENCY_CMD     		(uint8_t)(0xc0)
++#define SERVER_POWER_CONSUMPTION_CMD   	(uint8_t)(0x8F)
+ 
+ #define POWER_SUPPLY_INFO           (uint8_t)(0xb0)
+ #define IPMI_ENTITY_ID_POWER_SUPPLY (uint8_t)(0x0a)
+@@ -237,6 +257,8 @@ typedef struct
+ #define CLEAR_PWRMGMT_INFO_CMD	    (uint8_t)(0x9D)
+ #define GET_PWR_HEADROOM_CMD	    (uint8_t)(0xBB)
+ #define GET_PWR_CONSUMPTION_CMD	    (uint8_t)(0xB3)
++#define	GET_FRONT_PANEL_INFO_CMD		(uint8_t)0xb5
++
+ 
+ typedef struct _ipmi_power_monitor
+ {
+@@ -250,6 +272,23 @@ typedef struct _ipmi_power_monitor
+ } __attribute__ ((packed)) IPMI_POWER_MONITOR;
+ 
+ 
++#define MAX_POWER_FW_VERSION 8
++
++typedef struct _ipmi_power_supply_infoo
++{
++	/*No param_rev it is not a System Information Command */
++	uint16_t ratedWatts;
++	uint16_t ratedAmps;
++	uint16_t ratedVolts;
++	uint32_t vendorid;
++    uint8_t FrimwareVersion[MAX_POWER_FW_VERSION];
++	uint8_t  Powersupplytype;
++	uint16_t ratedDCWatts;
++	uint16_t Resv;	
++                          
++} __attribute__ ((packed)) IPMI_POWER_SUPPLY_INFO;
++
++
+ typedef struct ipmi_power_consumption_data
+ {
+     uint16_t actualpowerconsumption;
+@@ -313,6 +352,20 @@ typedef struct _power_headroom
+     uint16_t peakheadroom;
+ } __attribute__ ((packed)) POWER_HEADROOM;
+ 
++struct vFlashstr {
++	uint8_t val;
++	const char * str;
++};
++typedef struct ipmi_vFlash_extended_info
++{
++	uint8_t  vflashcompcode;
++	uint8_t  sdcardstatus;
++	uint32_t sdcardsize;
++	uint32_t sdcardavailsize;
++	uint8_t  bootpartion;
++	uint8_t  Resv;
++} __attribute__ ((packed)) IPMI_DELL_SDCARD_INFO;
++
+ 
+ typedef struct _SensorReadingType
+ {
+@@ -320,7 +373,7 @@ typedef struct _SensorReadingType
+     uint8_t sensorFlags;
+     uint16_t sensorState;
+ }SensorReadingType;
+-
++uint16_t compareinputwattage(IPMI_POWER_SUPPLY_INFO* powersupplyinfo, uint16_t inputwattage);
+ int ipmi_delloem_main(struct ipmi_intf * intf, int argc, char ** argv);
+ 
+ #endif /*IPMI_DELLOEM_H*/
+\ No newline at end of file
+diff -up ipmitool-1.8.11/lib/ipmi_delloem.c.dell-addons ipmitool-1.8.11/lib/ipmi_delloem.c
+--- ipmitool-1.8.11/lib/ipmi_delloem.c.dell-addons	2012-02-20 17:38:46.782553779 +0100
++++ ipmitool-1.8.11/lib/ipmi_delloem.c	2012-02-20 17:38:46.806553636 +0100
+@@ -31,6 +31,8 @@ POSSIBILITY OF SUCH DAMAGE.
+ * <deepaganesh_paulraj@dell.com>
+ *
+ * This code implements a dell OEM proprietary commands.
++* This Code is edited and Implemented the License feature for Delloem
++* Author Harsha S <Harsha_S1@dell.com>
+ */
+ 
+ #include <stdlib.h>
+@@ -68,13 +70,43 @@ POSSIBILITY OF SUCH DAMAGE.
+ /*--------------time header-----------------*/
+ #include <time.h>
+ 
+-#define DELL_OEM_NETFN             (uint8_t)(0x30)
++#define DELL_OEM_NETFN        (uint8_t)(0x30)
+ #define GET_IDRAC_VIRTUAL_MAC      (uint8_t)(0xC9)
++// 11g Support Macros
+ #define INVALID -1
+ #define SHARED 0
+ #define SHARED_WITH_FAILOVER_LOM2 1
+ #define DEDICATED 2
+ #define SHARED_WITH_FAILOVER_ALL_LOMS 3
++char AciveLOM_String [5] [10] =	{"dedicated","LOM1","LOM2","LOM3","LOM4" };
++#define	INVALID -1
++
++// 11g Support Strings for nic selection
++char NIC_Selection_Mode_String [4] [50] =	{	"shared",  
++												"shared with failover lom2",
++												"dedicated",
++												"shared with Failover all loms"
++											};
++
++// 11g Support Macros
++#define SHARED 0
++#define SHARED_WITH_FAILOVER_LOM2 1
++#define DEDICATED 2
++#define SHARED_WITH_FAILOVER_ALL_LOMS 3
++
++// 12g Support Strings for nic selection
++char NIC_Selection_Mode_String_12g[] [50] =	{	
++												"dedicated",
++												"shared with lom1",  
++												"shared with lom2",
++												"shared with lom3",
++												"shared with lom4",
++												"shared with failover lom1",
++												"shared with failover lom2",
++												"shared with failover lom3",
++												"shared with failover lom4",
++												"shared with failover all loms"
++											};
+ 
+ static int current_arg =0;
+ uint8_t iDRAC_FLAG=0;
+@@ -85,6 +117,14 @@ static uint8_t SetLEDSupported=0;
+ volatile uint8_t IMC_Type = IMC_IDRAC_10G;
+ 
+ 
++const struct vFlashstr vFlash_completion_code_vals[] = {
++	{0x00, "SUCCESS"},
++	{0x01, "NO_SD_CARD"},
++	{0x63, "UNKNOWN_ERROR"},
++	{0x00, NULL}
++};
++
++
+ POWER_HEADROOM powerheadroom;
+ 
+ uint8_t PowercapSetable_flag=0;
+@@ -92,6 +132,7 @@ uint8_t PowercapstatusFlag=0;
+ 
+ static void usage(void);
+ 
++/* LCD Function prototypes */
+ static int ipmi_delloem_lcd_main (struct ipmi_intf * intf, int argc, char ** argv);
+ static int ipmi_lcd_get_platform_model_name (struct ipmi_intf * intf,char* lcdstring,
+                         uint8_t max_length,uint8_t field_type);
+@@ -120,6 +161,7 @@ static int ipmi_lcd_configure (struct ip
+                     int8_t line_number, char * text);
+ static void ipmi_lcd_usage(void);
+ 
++/* MAC Function prototypes */
+ static int ipmi_delloem_mac_main (struct ipmi_intf * intf, int argc, char ** argv);
+ static int make_int(const char *str, int *value);
+ static void InitEmbeddedNICMacAddressValues ();
+@@ -130,6 +172,7 @@ static int ipmi_macinfo_11g (struct ipmi
+ static int ipmi_macinfo (struct ipmi_intf* intf, uint8_t NicNum);
+ static void ipmi_mac_usage(void);
+ 
++/* LAN Function prototypes */
+ static int ipmi_delloem_lan_main (struct ipmi_intf * intf, int argc, char ** argv);
+ static int IsLANSupported ();
+ static int get_nic_selection_mode (int current_arg, char ** argv);
+@@ -137,7 +180,9 @@ static int ipmi_lan_set_nic_selection (s
+ static int ipmi_lan_get_nic_selection (struct ipmi_intf* intf);
+ static int ipmi_lan_get_active_nic (struct ipmi_intf* intf);
+ static void ipmi_lan_usage(void);
++static int ipmi_lan_set_nic_selection_12g (struct ipmi_intf* intf, uint8_t* nic_selection);
+ 
++/* POwer monitor Function prototypes */
+ static int ipmi_delloem_powermonitor_main (struct ipmi_intf * intf, int argc, char ** argv);
+ static void ipmi_time_to_str(time_t rawTime, char* strTime);
+ static int ipmi_get_sensor_reading(struct ipmi_intf *intf ,
+@@ -166,6 +211,16 @@ static int getpowersupplyfruinfo(struct
+                        struct fru_header header, struct fru_info fru);
+ static void ipmi_powermonitor_usage(void);
+ 
++/* vFlash Function prototypes */
++static int ipmi_delloem_vFlash_main(struct ipmi_intf * intf, int argc, char ** argv);
++const char * get_vFlash_compcode_str(uint8_t vflashcompcode, const struct vFlashstr *vs);
++static int ipmi_get_sd_card_info(struct ipmi_intf* intf);
++static int ipmi_delloem_vFlash_process(struct ipmi_intf* intf, int current_arg, char ** argv);
++static void ipmi_vFlash_usage(void);
++
++
++/* LED Function prototypes */
++
+ static int ipmi_getsesmask(int, char **);
+ static int CheckSetLEDSupport(struct ipmi_intf * intf);
+ static int IsSetLEDSupported(void);
+@@ -226,7 +281,12 @@ ipmi_delloem_main(struct ipmi_intf * int
+     else if (strncmp(argv[current_arg], "powermonitor\0", 13) == 0) 
+     {
+         ipmi_delloem_powermonitor_main (intf,argc,argv);
+-    }       
++    }
++	/* vFlash Support */	
++	else if (strncmp(argv[current_arg], "vFlash\0", 7) == 0)
++	{
++        ipmi_delloem_vFlash_main (intf,argc,argv);	
++	}
+     else
+     {
+         usage();
+@@ -260,6 +320,7 @@ static void usage(void)
+     if (IsSetLEDSupported())
+ 	lprintf(LOG_NOTICE,    "    setled");         
+     lprintf(LOG_NOTICE, "    powermonitor");        
++	lprintf(LOG_NOTICE, "    vFlash");
+     lprintf(LOG_NOTICE, "");
+     lprintf(LOG_NOTICE, "For help on individual commands type:");
+     lprintf(LOG_NOTICE, "delloem <command> help");
+@@ -299,7 +360,7 @@ static int ipmi_delloem_lcd_main (struct
+     }
+     else if (strncmp(argv[current_arg], "info\0", 5) == 0) 
+     {
+-        if(iDRAC_FLAG==1)            
++		if((iDRAC_FLAG==IDRAC_11G) || (iDRAC_FLAG==IDRAC_12G) )            
+             rc = ipmi_lcd_get_info_wh(intf);
+         else
+             rc = ipmi_lcd_get_info(intf);
+@@ -326,7 +387,9 @@ static int ipmi_delloem_lcd_main (struct
+             current_arg++;
+             if (argc <= current_arg) {usage();return -1;}
+         }
+-        if ((strncmp(argv[current_arg], "mode\0", 5) == 0)&&(iDRAC_FLAG==1)) 
++
++
++		if ((strncmp(argv[current_arg], "mode\0", 5) == 0)&&((iDRAC_FLAG==IDRAC_11G) || (iDRAC_FLAG==IDRAC_12G) )) 
+         {
+             current_arg++;
+             if (argc <= current_arg) 
+@@ -400,7 +463,7 @@ static int ipmi_delloem_lcd_main (struct
+                 ipmi_lcd_usage();
+             }
+         }
+-        else if ((strncmp(argv[current_arg], "lcdqualifier\0", 13)== 0) &&(iDRAC_FLAG==1) )
++		else if ((strncmp(argv[current_arg], "lcdqualifier\0", 13)== 0) &&((iDRAC_FLAG==IDRAC_11G) || (iDRAC_FLAG==IDRAC_12G) ) )
+         {
+ 
+             current_arg++;
+@@ -435,7 +498,7 @@ static int ipmi_delloem_lcd_main (struct
+                 ipmi_lcd_usage();
+             }
+         }
+-        else if( (strncmp(argv[current_arg], "errordisplay\0", 13) == 0)&&(iDRAC_FLAG==1)) 
++		else if( (strncmp(argv[current_arg], "errordisplay\0", 13) == 0)&&((iDRAC_FLAG==IDRAC_11G) || (iDRAC_FLAG==IDRAC_12G) )) 
+         {
+ 
+             current_arg++;
+@@ -600,7 +663,7 @@ ipmi_lcd_get_platform_model_name (struct
+     for (ii = 0; ii < 4; ii++)
+     {
+         int bytes_to_copy;
+-
++		memset (&req,0,sizeof(req));
+         req.msg.netfn = IPMI_NETFN_APP;
+         req.msg.lun = 0;
+         req.msg.cmd = IPMI_GET_SYS_INFO;
+@@ -669,6 +732,7 @@ ipmi_idracvalidator_command (struct ipmi
+     struct ipmi_rq req = {0};
+     uint8_t data[4];
+ 
++	memset (&req,0,sizeof(req));
+     req.msg.netfn = IPMI_NETFN_APP;
+     req.msg.lun = 0;
+     req.msg.cmd = IPMI_GET_SYS_INFO;
+@@ -687,10 +751,14 @@ ipmi_idracvalidator_command (struct ipmi
+         /*lprintf(LOG_ERR, " Error getting IMC type: %s",
+         val2str(rsp->ccode, completion_code_vals));  */
+         return -1;
++	}
++	if( (IMC_IDRAC_11G_MONOLITHIC == rsp->data[10]) || (IMC_IDRAC_11G_MODULAR ==rsp->data[10]) )
++    {
++		iDRAC_FLAG=IDRAC_11G;
+     }
+-    if( (0x0A == rsp->data[10]) || (0x0D ==rsp->data[10]) )
++	else if( (IMC_IDRAC_12G_MONOLITHIC == rsp->data[10]) || (IMC_IDRAC_12G_MODULAR==rsp->data[10]) )
+     {
+-        iDRAC_FLAG=1;
++		iDRAC_FLAG=IDRAC_12G;
+     }
+     else
+     {
+@@ -1773,17 +1841,21 @@ ipmi_lcd_usage(void)
+         lprintf(LOG_NOTICE, "   lcd set {none}|{default}|{custom <text>}");
+         lprintf(LOG_NOTICE, "      Set LCD text displayed during non-fault conditions");
+     }
+-    else if(iDRAC_FLAG==1)
++    else if( (iDRAC_FLAG==IDRAC_11G) || (iDRAC_FLAG==IDRAC_12G) )
+     {
+         lprintf(LOG_NOTICE, "   lcd set {mode}|{lcdqualifier}|{errordisplay}");
++		lprintf(LOG_NOTICE, "      Allows you to set the LCD mode and user-defined string.");
+         lprintf(LOG_NOTICE, "");
+         lprintf(LOG_NOTICE, "   lcd set mode {none}|{modelname}|{ipv4address}|{macaddress}|");
+         lprintf(LOG_NOTICE, "   {systemname}|{servicetag}|{ipv6address}|{ambienttemp}");
+         lprintf(LOG_NOTICE, "   {systemwatt }|{assettag}|{userdefined}<text>");
+-        lprintf(LOG_NOTICE, "");
++		lprintf(LOG_NOTICE, "	   Allows you to set the LCD display mode to any of the preceding parameters");
++		lprintf(LOG_NOTICE, "");
+         lprintf(LOG_NOTICE, "   lcd set lcdqualifier {watt}|{btuphr}|{celsius}|{fahrenheit}");
++		lprintf(LOG_NOTICE, "      Allows you to set the unit for the system ambient temperature mode.");		
+         lprintf(LOG_NOTICE, "");
+         lprintf(LOG_NOTICE, "   lcd set errordisplay {sel}|{simple}");
++		lprintf(LOG_NOTICE, "      Allows you to set the error display.");				
+     }
+     lprintf(LOG_NOTICE, "");
+     lprintf(LOG_NOTICE, "   lcd info");
+@@ -1928,7 +2000,7 @@ static int ipmi_macinfo_drac_idrac_virtu
+         input_length = 0;
+         msg_data[input_length++] = 1; /*Get*/
+ 
+-        req.msg.netfn = DELL_OEM_NETFN;
++      	req.msg.netfn = DELL_OEM_NETFN;
+         req.msg.lun = 0;                
+         req.msg.cmd = GET_IDRAC_VIRTUAL_MAC;
+         req.msg.data = msg_data;
+@@ -2026,6 +2098,10 @@ static int ipmi_macinfo_drac_idrac_mac(s
+ 
+         if (IMC_IDRAC_10G == IMC_Type)
+             printf ("\n\rDRAC MAC Address ");
++		else if ((IMC_IDRAC_11G_MODULAR == IMC_Type) || (IMC_IDRAC_11G_MONOLITHIC== IMC_Type))
++			printf ("\n\riDRAC6 MAC Address ");
++		else if ((IMC_IDRAC_12G_MODULAR == IMC_Type) || (IMC_IDRAC_12G_MONOLITHIC== IMC_Type))		
++			printf ("\n\riDRAC7 MAC Address ");
+         else
+             printf ("\n\riDRAC6 MAC Address ");
+ 
+@@ -2293,7 +2369,8 @@ static int ipmi_macinfo (struct ipmi_int
+     {
+         return ipmi_macinfo_10g (intf,NicNum);
+     }
+-    else if (IMC_IDRAC_11G_MODULAR == IMC_Type || IMC_IDRAC_11G_MONOLITHIC== IMC_Type ) 
++	else if ((IMC_IDRAC_11G_MODULAR == IMC_Type || IMC_IDRAC_11G_MONOLITHIC== IMC_Type )  ||
++			(IMC_IDRAC_12G_MODULAR == IMC_Type || IMC_IDRAC_12G_MONOLITHIC== IMC_Type ) )
+     {
+         return ipmi_macinfo_11g (intf,NicNum);
+     }
+@@ -2347,6 +2424,7 @@ static int ipmi_delloem_lan_main (struct
+     int rc = 0;
+ 
+     int nic_selection = 0;
++	char nic_set[2] = {0};
+     current_arg++;
+     if (argv[current_arg] == NULL)
+     {
+@@ -2361,6 +2439,18 @@ static int ipmi_delloem_lan_main (struct
+             ipmi_lan_usage();
+             return -1;
+         }
++		if(iDRAC_FLAG == IDRAC_12G) {
++			nic_selection = get_nic_selection_mode_12g(intf,current_arg,argv,nic_set);
++			if (INVALID == nic_selection)
++			{
++				ipmi_lan_usage();
++				return -1;
++			}				
++		
++			rc = ipmi_lan_set_nic_selection_12g(intf,nic_set);
++		}
++		else
++		{
+         nic_selection = get_nic_selection_mode(current_arg,argv);
+ 
+ 
+@@ -2370,6 +2460,7 @@ static int ipmi_delloem_lan_main (struct
+             return -1;
+         }                               
+         rc = ipmi_lan_set_nic_selection(intf,nic_selection);
++		}		
+         return 0;                       
+     }
+     else if (strncmp(argv[current_arg], "get\0", 4) == 0)
+@@ -2405,16 +2496,135 @@ static int IsLANSupported ()
+     return 1;
+ }
+ 
+-char NIC_Selection_Mode_String [4] [50] =     {       "shared",  
+-"shared with failover lom2",
+-"dedicated",
+-"shared with Failover all loms"
+-};
+ 
++int get_nic_selection_mode_12g (struct ipmi_intf* intf,int current_arg, char ** argv, char *nic_set)
++{
++	int nic_selection_mode = 0;
++	int failover = 0;
+ 
+-char AciveLOM_String [5] [10] =       {"dedicated","LOM1","LOM2","LOM3","LOM4" };
+-
++	// First get the current settings.
++	struct ipmi_rs * rsp;
++	struct ipmi_rq req;
++
++	uint8_t msg_data[30];
++	uint8_t input_length=0;
++	
++	input_length = 0;
++		
++   	req.msg.netfn = DELL_OEM_NETFN;
++   	req.msg.lun = 0;		
++	
++  	req.msg.cmd = GET_NIC_SELECTION_12G_CMD;
++
++  	req.msg.data = msg_data;
++  	req.msg.data_len = input_length;
++  
++	rsp = intf->sendrecv(intf, &req);
++	if (rsp == NULL)
++	{
++		lprintf(LOG_ERR, " Error in getting nic selection");
++		return -1;
++	}
++	else if (rsp->ccode > 0) 
++	{
++		lprintf(LOG_ERR, " Error in getting nic selection (%s) \n",
++		  val2str(rsp->ccode, completion_code_vals) );
++	  	return -1;
++	}
++	
++	nic_set[0] = rsp->data[0];
++	nic_set[1] = rsp->data[1];
++
++	
++	if (NULL!= argv[current_arg] && 0 == strncmp(argv[current_arg], "dedicated\0", 10)) 
++	{
++		nic_set[0] = 1;
++		return 0;
++	}
++	if (NULL!= argv[current_arg] && 0 == strncmp(argv[current_arg], "shared\0", 7)) 
++	{
++		
++	}
++	else
++		return INVALID;
++	
++	current_arg++;	
++	if (NULL!= argv[current_arg] && 0 == strncmp(argv[current_arg], "with\0", 5)) 
++	{
++	}	
++	else
++		return INVALID;		
++	
++	current_arg++;	
++	if (NULL!= argv[current_arg] && 0 == strncmp(argv[current_arg], "failover\0", 9)) 
++	{
++		failover = 1;
++	}	
++	if(failover)
++		current_arg++;	
++	if (NULL!= argv[current_arg] && 0 == strncmp(argv[current_arg], "lom1\0", 5)) 
++	{
++		if(failover) {
++			nic_set[1] = 2;
++		}	
++		else {
++			nic_set[0] = 2;
++		}	
++		return 0;
++	}
++	else if (NULL!= argv[current_arg] && 0 == strncmp(argv[current_arg], "lom2\0", 5)) 
++	{
++		if(failover) {		
++			nic_set[1] = 3;
++		}	
++		else {
++			nic_set[0] = 3;
++		}	
++		return 0;
++	}
++	else if (NULL!= argv[current_arg] && 0 == strncmp(argv[current_arg], "lom3\0", 5)) 
++	{
++		if(failover) {	
++			nic_set[1] = 4;
++		}	
++		else {
++			nic_set[0] = 4;
++		}	
++		return 0;
++	} 
++	else if (NULL!= argv[current_arg] && 0 == strncmp(argv[current_arg], "lom4\0", 5)) 
++	{
++		if(failover) {	
++			nic_set[1] = 5;
++		}	
++		else {
++			nic_set[0] = 5;
++		}	
++		return 0;
++	}	
++	else if (failover && NULL!= argv[current_arg] && 0 == strncmp(argv[current_arg], "none\0", 5)) 
++	{
++		if(failover) {	
++			nic_set[1] = 0;
++		}	
++		return 0;
++	}	
++	else if (failover && NULL!= argv[current_arg] && 0 == strncmp(argv[current_arg], "all\0", 4)) 
++	{
++	}	
++	else
++		return INVALID;	
++	
++	current_arg++;	
++	if (failover && NULL!= argv[current_arg] && 0 == strncmp(argv[current_arg], "loms\0", 5)) 
++	{
++		nic_set[1] = 6;
++		return 0;
++	}	
+ 
++	return INVALID;
++	
++}
+ 
+ 
+ static int get_nic_selection_mode (int current_arg, char ** argv)
+@@ -2461,7 +2671,49 @@ static int get_nic_selection_mode (int c
+     }       
+ 
+     return INVALID;
++	
++}
++
++
++static int ipmi_lan_set_nic_selection_12g (struct ipmi_intf* intf, uint8_t* nic_selection)
++{
++	struct ipmi_rs * rsp;
++	struct ipmi_rq req;
++
++	uint8_t msg_data[30];
++	uint8_t input_length=0;
++
++	input_length = 0;
++		
++	msg_data[input_length++] = nic_selection[0]; 
++	msg_data[input_length++] = nic_selection[1]; 
++
++	req.msg.netfn = DELL_OEM_NETFN;
++	req.msg.lun = 0;		
++	req.msg.cmd = SET_NIC_SELECTION_12G_CMD;
++	req.msg.data = msg_data;
++	req.msg.data_len = input_length;
++  
++	rsp = intf->sendrecv(intf, &req);
++	if (rsp == NULL)
++	{
++		lprintf(LOG_ERR, " Error in setting nic selection");
++		return -1;
++	}
++	// Check license only for setting the dedicated nic.
++	else if( (nic_selection[0] == 1) && ((iDRAC_FLAG == IDRAC_12G) && (rsp->ccode == LICENSE_NOT_SUPPORTED))) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
++	} 
++	else if (rsp->ccode > 0) 
++	{
++		lprintf(LOG_ERR, " Error in setting nic selection (%s) \n",
++		  val2str(rsp->ccode, completion_code_vals) );
++		return -1;
++	}
++	printf("configured successfully");
+ 
++	return 0;
+ }
+ 
+ 
+@@ -2478,7 +2730,7 @@ static int ipmi_lan_set_nic_selection (s
+ 
+     msg_data[input_length++] = nic_selection; 
+ 
+-    req.msg.netfn = DELL_OEM_NETFN;
++   	req.msg.netfn = DELL_OEM_NETFN;
+     req.msg.lun = 0;                
+     req.msg.cmd = SET_NIC_SELECTION_CMD;
+     req.msg.data = msg_data;
+@@ -2504,6 +2756,7 @@ static int ipmi_lan_set_nic_selection (s
+ static int ipmi_lan_get_nic_selection (struct ipmi_intf* intf)
+ {
+     uint8_t nic_selection=-1;
++	uint8_t nic_selection_failover = 0;
+ 
+     struct ipmi_rs * rsp;
+     struct ipmi_rq req;
+@@ -2514,8 +2767,11 @@ static int ipmi_lan_get_nic_selection (s
+ 
+     input_length = 0;
+ 
+-    req.msg.netfn = DELL_OEM_NETFN;
++   	req.msg.netfn = DELL_OEM_NETFN;
+     req.msg.lun = 0;                
++	if(iDRAC_FLAG == IDRAC_12G)
++	  	req.msg.cmd = GET_NIC_SELECTION_12G_CMD;
++	else  	
+     req.msg.cmd = GET_NIC_SELECTION_CMD;
+     req.msg.data = msg_data;
+     req.msg.data_len = input_length;
+@@ -2534,7 +2790,33 @@ static int ipmi_lan_get_nic_selection (s
+     }
+     nic_selection = rsp->data[0];
+ 
++	if(iDRAC_FLAG == IDRAC_12G)
++	{		
++		
++		nic_selection_failover = rsp->data[1];
++		if ((nic_selection < 6) && (nic_selection > 0) && (nic_selection_failover < 7))
++		{
++			if(nic_selection == 1) {
++				printf ("\n%s",NIC_Selection_Mode_String_12g[nic_selection-1]);
++			} else if(nic_selection) {
++				printf ("\nShared LOM   :  %s",NIC_Selection_Mode_String_12g[nic_selection-1]);
++				if(nic_selection_failover  == 0)
++					printf ("\nFailover LOM :  None");
++				else if(nic_selection_failover   >= 2 && nic_selection_failover   <= 6)
++					printf ("\nFailover LOM :  %s",NIC_Selection_Mode_String_12g[nic_selection_failover + 3]);
++			}
++				
++		} 
++		else
++		{
++			lprintf(LOG_ERR, " Error Outof bond Value received (%d) (%d) \n",nic_selection,nic_selection_failover);
++		  	return -1;	  	
++		}
++	}
++	else
++	{
+     printf ("\n%s",NIC_Selection_Mode_String[nic_selection]);
++	}
+ 
+     return 0;
+ }      
+@@ -2556,7 +2838,7 @@ static int ipmi_lan_get_active_nic (stru
+     msg_data[input_length++] = 0; /*Reserved*/
+     msg_data[input_length++] = 0; /*Reserved*/        
+ 
+-    req.msg.netfn = DELL_OEM_NETFN;
++   	req.msg.netfn = DELL_OEM_NETFN;
+     req.msg.lun = 0;                
+     req.msg.cmd = GET_ACTIVE_NIC_CMD;
+     req.msg.data = msg_data;
+@@ -2587,10 +2869,27 @@ ipmi_lan_usage(void)
+ {
+     lprintf(LOG_NOTICE, "");
+     lprintf(LOG_NOTICE, "   lan set <Mode> ");
+-    lprintf(LOG_NOTICE, "      sets the NIC Selection Mode (dedicated, shared, shared with failover lom2, shared with Failover all loms).");
++	if(iDRAC_FLAG == IDRAC_12G) {
++		lprintf(LOG_NOTICE, "      sets the NIC Selection Mode :");
++		lprintf(LOG_NOTICE, "      	dedicated, shared with lom1, shared with lom2,shared with lom3,shared ");
++		lprintf(LOG_NOTICE, "		with lom4,shared with failover lom1,shared with failover lom2,shared ");
++		lprintf(LOG_NOTICE, "		with failover lom3,shared with failover lom4,shared with Failover all ");
++		lprintf(LOG_NOTICE, "		loms, shared with Failover None).");
++	} else {
++	    lprintf(LOG_NOTICE, "      sets the NIC Selection Mode (dedicated, shared, shared with failover lom2, ");	
++	    lprintf(LOG_NOTICE, "      			shared with Failover all loms).");
++	}
+     lprintf(LOG_NOTICE, "");
+     lprintf(LOG_NOTICE, "   lan get ");
+-    lprintf(LOG_NOTICE, "      returns the current NIC Selection Mode (dedicated, shared, shared with failover lom2, shared with Failover all loms).");
++	if(iDRAC_FLAG == IDRAC_12G) {
++		lprintf(LOG_NOTICE, "      returns the current NIC Selection Mode (dedicated, shared with lom1, shared ");
++		lprintf(LOG_NOTICE, "		with lom2, shared with lom3, shared with lom4,shared with failover lom1,");
++		lprintf(LOG_NOTICE, "		shared with failover lom2,shared with failover lom3,shared with failover ");
++		lprintf(LOG_NOTICE, "		lom4,shared with Failover all loms,shared with Failover None).");
++	}else {
++		lprintf(LOG_NOTICE, "      returns the current NIC Selection Mode (dedicated, shared, shared with failover");
++		lprintf(LOG_NOTICE, "      			lom2, shared with Failover all loms).");
++	}
+     lprintf(LOG_NOTICE, "");
+     lprintf(LOG_NOTICE, "   lan get active");
+     lprintf(LOG_NOTICE, "      returns the current active NIC (dedicated, LOM1, LOM2, LOM3, LOM4).");       
+@@ -2733,6 +3032,11 @@ static int ipmi_delloem_powermonitor_mai
+             ipmi_powermonitor_usage();
+             return -1;
+         }
++		if (strchr(argv[current_arg], '.'))
++		{
++			lprintf(LOG_ERR, " Cap value in Watts, Btu/hr or percent should be whole number");
++			return -1;
++		}
+         make_int(argv[current_arg],&val);
+         current_arg++;
+         if (argv[current_arg] == NULL)
+@@ -2883,7 +3187,10 @@ ipmi_get_power_capstatus_command (struct
+     rsp = intf->sendrecv(intf, &req);
+     if (rsp == NULL) {
+         lprintf(LOG_ERR, " Error getting powercap status");
+-        return -1;
++		return -1;
++	} else if((iDRAC_FLAG == IDRAC_12G) && (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	// Return Error as unlicensed
+     } else if (rsp->ccode > 0) {
+         lprintf(LOG_ERR, " Error getting powercap statusr: %s",
+             val2str(rsp->ccode, completion_code_vals));
+@@ -2914,7 +3221,8 @@ ipmi_set_power_capstatus_command (struct
+     struct ipmi_rs * rsp = NULL;
+     struct ipmi_rq req = {0};
+     uint8_t data[2];
+-    ipmi_get_power_capstatus_command(intf);
++	if(ipmi_get_power_capstatus_command(intf) < 0)
++		return -1;
+ 
+     if (PowercapSetable_flag!=1)
+     {
+@@ -2934,6 +3242,9 @@ ipmi_set_power_capstatus_command (struct
+     if (rsp == NULL) {
+         lprintf(LOG_ERR, " Error setting powercap status");
+         return -1;
++	} else if((iDRAC_FLAG == IDRAC_12G) && (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	//return unlicensed Error code
+     } else if (rsp->ccode > 0) {
+         lprintf(LOG_ERR, " Error setting powercap statusr: %s",
+             val2str(rsp->ccode, completion_code_vals));
+@@ -3029,7 +3340,11 @@ static int ipmi_powermgmt(struct ipmi_in
+         lprintf(LOG_ERR, " Error getting power management information.\n");
+         return -1;
+     } 
+-    if ((rsp->ccode == 0xc1)||(rsp->ccode == 0xcb)) {
++
++	if((iDRAC_FLAG == IDRAC_12G) && (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
++	} else if ((rsp->ccode == 0xc1)||(rsp->ccode == 0xcb)) {
+         lprintf(LOG_ERR, " Error getting power management information: Command not supported on this system.");
+         return -1;
+     }else if (rsp->ccode != 0) {
+@@ -3148,6 +3463,9 @@ ipmi_powermgmt_clear(struct ipmi_intf* i
+     if (rsp == NULL) {
+         lprintf(LOG_ERR, " Error clearing power values.\n");
+         return -1;
++} else if((iDRAC_FLAG == IDRAC_12G) && (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
+     } else if (rsp->ccode == 0xc1) {
+         lprintf(LOG_ERR, " Error clearing power values, command not supported on this system.\n");
+         return -1;
+@@ -3156,6 +3474,7 @@ ipmi_powermgmt_clear(struct ipmi_intf* i
+             val2str(rsp->ccode, completion_code_vals));
+         return -1;
+     }
++	return 0;
+ 
+ }
+ 
+@@ -3226,6 +3545,9 @@ static int ipmi_get_power_headroom_comma
+     if (rsp == NULL) {
+         lprintf(LOG_ERR, " Error getting power headroom status");
+         return -1;
++} else if((iDRAC_FLAG == IDRAC_12G) && (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
+     } else if ((rsp->ccode == 0xc1)||(rsp->ccode == 0xcb)){
+         lprintf(LOG_ERR, " Error getting power headroom status: Command not supported on this system ");
+         return -1;
+@@ -3251,14 +3573,14 @@ static int ipmi_get_power_headroom_comma
+         peakpowerheadroombtuphr=watt_to_btuphr_conversion(powerheadroom.peakheadroom);
+         instantpowerhearoom= watt_to_btuphr_conversion(powerheadroom.instheadroom);
+ 
+-        printf ("System Instantaneous Headroom : %d BTU/hr\n",instantpowerhearoom);
+-        printf ("System Peak Headroom          : %d BTU/hr\n",peakpowerheadroombtuphr);
+-    }
+-    else
+-    {
+-        printf ("System Instantaneous Headroom : %d W\n",powerheadroom.instheadroom);
+-        printf ("System Peak Headroom          : %d W\n",powerheadroom.peakheadroom);
+-    }
++        printf ("System Instantaneous Headroom : %ld BTU/hr\n",instantpowerhearoom);
++		printf ("System Peak Headroom          : %ld BTU/hr\n",peakpowerheadroombtuphr);
++	}
++	else
++	{
++        printf ("System Instantaneous Headroom : %ld W\n",powerheadroom.instheadroom);
++		printf ("System Peak Headroom          : %ld W\n",powerheadroom.peakheadroom);
++	}
+ 
+     return 0;
+ }
+@@ -3387,6 +3709,9 @@ static int ipmi_get_instan_power_consmpt
+         lprintf(LOG_ERR, " Error getting instantaneous power consumption data .\n");
+ 
+         return -1;
++	} else if((iDRAC_FLAG == IDRAC_12G) && (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
+     } else if ((rsp->ccode == 0xc1)||(rsp->ccode == 0xcb)) {
+         lprintf(LOG_ERR, "  Error getting instantaneous power consumption data: Command not supported on this system.");
+         return -1;
+@@ -3513,7 +3838,10 @@ static int ipmi_get_avgpower_consmpt_his
+         lprintf(LOG_ERR, " Error getting average power consumption history data .\n");
+         return -1;
+     } 
+-    else if ((rsp->ccode == 0xc1)||(rsp->ccode == 0xcb))
++	else if((iDRAC_FLAG == IDRAC_12G) &&  (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
++	} else if ((rsp->ccode == 0xc1)||(rsp->ccode == 0xcb))
+     {
+         lprintf(LOG_ERR, "  Error getting average power consumption  history data: Command not supported on this system.");
+         return -1;
+@@ -3579,7 +3907,10 @@ static int ipmi_get_peakpower_consmpt_hi
+         lprintf(LOG_ERR, " Error getting  peak power consumption history data .\n");
+         return -1;
+     }
+-    else if ((rsp->ccode == 0xc1)||(rsp->ccode == 0xcb))
++	else if((iDRAC_FLAG == IDRAC_12G) && (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
++	} else if ((rsp->ccode == 0xc1)||(rsp->ccode == 0xcb))
+     {
+         lprintf(LOG_ERR, "  Error getting peak power consumption history data: Command not supported on this system.");
+         return -1;
+@@ -3652,7 +3983,10 @@ static int ipmi_get_minpower_consmpt_his
+         lprintf(LOG_ERR, " Error getting  peak power consumption history data .\n");
+         return -1;
+     }
+-    else if ((rsp->ccode == 0xc1)||(rsp->ccode == 0xcb))
++	else if((iDRAC_FLAG == IDRAC_12G) &&  (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
++	} else if ((rsp->ccode == 0xc1)||(rsp->ccode == 0xcb))
+     {
+         lprintf(LOG_ERR, "  Error getting peak power consumption history data: Command not supported on this system.");
+         return -1;
+@@ -3779,35 +4113,35 @@ static int ipmi_print_power_consmpt_hist
+ 
+             printf ("Average Power Consumption  ");         
+             tempbtuphrconv=(avgpower.lastminutepower);
+-            printf ("%4d W          ",tempbtuphrconv);
+-            tempbtuphrconv=(avgpower.lasthourpower);
+-            printf ("%4d W        ",tempbtuphrconv);
+-            tempbtuphrconv=(avgpower.lastdaypower);
+-            printf ("%4d W       ",tempbtuphrconv);
+-            tempbtuphrconv=(avgpower.lastweakpower);
+-            printf ("%4d W   \n\r",tempbtuphrconv);
+-
+-            printf ("Max Power Consumption      ");         
+-            tempbtuphrconv=(stPeakpower.lastminutepower);
+-            printf ("%4d W          ",tempbtuphrconv);
+-            tempbtuphrconv=(stPeakpower.lasthourpower);
+-            printf ("%4d W        ",tempbtuphrconv);
+-            tempbtuphrconv=(stPeakpower.lastdaypower);
+-            printf ("%4d W       ",tempbtuphrconv);
+-            tempbtuphrconv=(stPeakpower.lastweakpower);
+-            printf ("%4d W   \n\r",tempbtuphrconv);
+-
+-            printf ("Min Power Consumption      ");         
+-            tempbtuphrconv=(stMinpower.lastminutepower);
+-            printf ("%4d W          ",tempbtuphrconv);
+-            tempbtuphrconv=(stMinpower.lasthourpower);
+-            printf ("%4d W        ",tempbtuphrconv);
+-            tempbtuphrconv=(stMinpower.lastdaypower);
+-            printf ("%4d W       ",tempbtuphrconv);
+-            tempbtuphrconv=(stMinpower.lastweakpower);
+-            printf ("%4d W   \n\r\n\r",tempbtuphrconv);
+-        }               
+-
++			printf ("%4ld W          ",tempbtuphrconv);
++			tempbtuphrconv=(avgpower.lasthourpower);
++			printf ("%4ld W        ",tempbtuphrconv);
++			tempbtuphrconv=(avgpower.lastdaypower);
++			printf ("%4ld W       ",tempbtuphrconv);
++			tempbtuphrconv=(avgpower.lastweakpower);
++			printf ("%4ld W   \n\r",tempbtuphrconv);
++
++		printf ("Max Power Consumption      ");		
++			tempbtuphrconv=(stPeakpower.lastminutepower);
++			printf ("%4ld W          ",tempbtuphrconv);
++			tempbtuphrconv=(stPeakpower.lasthourpower);
++			printf ("%4ld W        ",tempbtuphrconv);
++			tempbtuphrconv=(stPeakpower.lastdaypower);
++			printf ("%4ld W       ",tempbtuphrconv);
++			tempbtuphrconv=(stPeakpower.lastweakpower);
++			printf ("%4ld W   \n\r",tempbtuphrconv);
++
++		printf ("Min Power Consumption      ");		
++			tempbtuphrconv=(stMinpower.lastminutepower);
++			printf ("%4ld W          ",tempbtuphrconv);
++			tempbtuphrconv=(stMinpower.lasthourpower);
++			printf ("%4ld W        ",tempbtuphrconv);
++			tempbtuphrconv=(stMinpower.lastdaypower);
++			printf ("%4ld W       ",tempbtuphrconv);
++			tempbtuphrconv=(stMinpower.lastweakpower);
++		   	printf ("%4ld W   \n\r\n\r",tempbtuphrconv);
++		}		
++		
+         lastminutepeakpower=stPeakpower.lastminutepowertime;
+         lasthourpeakpower=stPeakpower.lasthourpowertime;
+         lastdaypeakpower=stPeakpower.lastdaypowertime;
+@@ -3840,6 +4174,7 @@ static int ipmi_print_power_consmpt_hist
+         printf ("Last Week       : %s",timestr);        
+ 
+     }
++	return rc;
+ 
+ }
+ 
+@@ -3888,6 +4223,9 @@ static int ipmi_get_power_cap(struct ipm
+         }
+         return -1;
+ 
++	} else if((iDRAC_FLAG == IDRAC_12G) && (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
+     } else if ((rsp->ccode == 0xc1)||(rsp->ccode == 0xcb)) {
+ 
+         lprintf(LOG_ERR, "  Error getting power cap: Command not supported on this system.");
+@@ -3948,6 +4286,7 @@ static int ipmi_print_power_cap(struct i
+     int rc;
+     IPMI_POWER_CAP ipmipowercap;
+ 
++	memset(&ipmipowercap,0,sizeof(ipmipowercap));
+     rc=ipmi_get_power_cap(intf,&ipmipowercap);
+ 
+ 
+@@ -3955,16 +4294,16 @@ static int ipmi_print_power_cap(struct i
+     {
+         if (unit ==btuphr){
+             tempbtuphrconv=watt_to_btuphr_conversion(ipmipowercap.MaximumPowerConsmp);
+-            printf ("Maximum power: %d  BTU/hr\n",tempbtuphrconv);
+-            tempbtuphrconv=watt_to_btuphr_conversion(ipmipowercap.MinimumPowerConsmp);
+-            printf ("Minimum power: %d  BTU/hr\n",tempbtuphrconv);
+-            tempbtuphrconv=watt_to_btuphr_conversion(ipmipowercap.PowerCap);
+-            printf ("Power cap    : %d  BTU/hr\n",tempbtuphrconv);
+-        }else{
+-
+-            printf ("Maximum power: %d Watt\n",ipmipowercap.MaximumPowerConsmp);
+-            printf ("Minimum power: %d Watt\n",ipmipowercap.MinimumPowerConsmp);
+-            printf ("Power cap    : %d Watt\n",ipmipowercap.PowerCap);
++			printf ("Maximum power: %ld  BTU/hr\n",tempbtuphrconv);
++			tempbtuphrconv=watt_to_btuphr_conversion(ipmipowercap.MinimumPowerConsmp);
++			printf ("Minimum power: %ld  BTU/hr\n",tempbtuphrconv);
++			tempbtuphrconv=watt_to_btuphr_conversion(ipmipowercap.PowerCap);
++			printf ("Power cap    : %ld  BTU/hr\n",tempbtuphrconv);
++		}else{
++		
++			printf ("Maximum power: %ld Watt\n",ipmipowercap.MaximumPowerConsmp);
++			printf ("Minimum power: %ld Watt\n",ipmipowercap.MinimumPowerConsmp);
++			printf ("Power cap    : %ld Watt\n",ipmipowercap.PowerCap);
+         }
+     }
+     return rc;
+@@ -3991,10 +4330,11 @@ static int ipmi_set_power_cap(struct ipm
+     uint64_t maxpowerbtuphr;
+     uint64_t maxpowerbtuphr1;
+     uint64_t minpowerbtuphr;
+-    int rc;
+-    IPMI_POWER_CAP ipmipowercap;
++	IPMI_POWER_CAP ipmipowercap;
++
++	if(ipmi_get_power_capstatus_command(intf) < 0)
++		return -1;	// Adding the failed condition check
+ 
+-    ipmi_get_power_capstatus_command(intf);
+     if (PowercapSetable_flag!=1)
+     {
+         lprintf(LOG_ERR, " Can not set powercap on this system");
+@@ -4030,8 +4370,12 @@ static int ipmi_set_power_cap(struct ipm
+                 rsp->data[8], rsp->data[9], rsp->data[10],rsp->data[11]);
+         }
+         return -1;
+-
+-    }
++			
++	}
++	else if((iDRAC_FLAG == IDRAC_12G) && (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
++	} 
+     else if (rsp->ccode == 0xc1) 
+     {
+ 
+@@ -4106,7 +4450,7 @@ static int ipmi_set_power_cap(struct ipm
+     }
+     else if(unit ==percent)
+     {
+-        if((val <1)||(val>100))
++       	if((val <0)||(val>100))
+         {
+             lprintf(LOG_ERR, " Cap value is out of boundary conditon it should be between 0  - 100");
+             return -1;
+@@ -4141,6 +4485,10 @@ static int ipmi_set_power_cap(struct ipm
+         lprintf(LOG_ERR, " Error setting power cap");
+         return -1;
+     }
++	else if((iDRAC_FLAG == IDRAC_12G) && (rsp->ccode == LICENSE_NOT_SUPPORTED)) {
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
++	} 
+     else if (rsp->ccode > 0) 
+     {
+         lprintf(LOG_ERR, " Error setting power cap: %s",
+@@ -4242,6 +4590,7 @@ static int getpowersupplyfruinfo(struct
+ 
+     memcpy(&header, rsp->data + 1, 8);
+ 
++	return 0;
+ 
+ 
+ }
+@@ -4289,6 +4638,221 @@ ipmi_powermonitor_usage(void)
+     lprintf(LOG_NOTICE, "");
+ 
+ }
++/*****************************************************************
++* Function Name:	   ipmi_delloem_vFlash_main
++*
++* Description:		   This function processes the delloem vFlash command
++* Input:			   intf    - ipmi interface
++					   argc    - no of arguments
++					   argv    - argument string array
++* Output:		 
++*
++* Return:			   return code	   0 - success
++*						  -1 - failure
++*
++******************************************************************/
++
++static int ipmi_delloem_vFlash_main (struct ipmi_intf * intf, int argc, char ** argv)
++{
++	int rc = 0;
++
++	current_arg++;
++	rc = ipmi_delloem_vFlash_process(intf, current_arg, argv);
++}
++
++
++
++/*****************************************************************
++* Function Name: 	get_vFlash_compcode_str
++*
++* Description: 	This function maps the vFlash completion code
++* 		to a string
++* Input : vFlash completion code and static array of codes vs strings
++* Output: - 		
++* Return: returns the mapped string		
++*
++******************************************************************/
++const char * 
++get_vFlash_compcode_str(uint8_t vflashcompcode, const struct vFlashstr *vs)
++{
++	static char un_str[32];
++	int i;
++
++	for (i = 0; vs[i].str != NULL; i++) {
++		if (vs[i].val == vflashcompcode)
++			return vs[i].str;
++	}
++
++	memset(un_str, 0, 32);
++	snprintf(un_str, 32, "Unknown (0x%02X)", vflashcompcode);
++
++	return un_str;
++}
++
++/*****************************************************************
++* Function Name: 	ipmi_get_sd_card_info
++*
++* Description: This function prints the vFlash Extended SD card info
++* Input : ipmi interface
++* Output: prints the sd card extended info		
++* Return: 0 - success -1 - failure
++*
++******************************************************************/
++static int
++ipmi_get_sd_card_info(struct ipmi_intf* intf) {
++	struct ipmi_rs * rsp;
++	struct ipmi_rq req;
++
++	uint8_t msg_data[2];
++	uint8_t input_length=0;
++	uint8_t cardstatus=0x00;
++
++	IPMI_DELL_SDCARD_INFO * sdcardinfoblock;
++
++	input_length = 2;
++	msg_data[0] = msg_data[1] = 0x00;
++
++	req.msg.netfn = DELL_OEM_NETFN;
++	req.msg.lun = 0;
++	req.msg.cmd = IPMI_GET_EXT_SD_CARD_INFO;
++	req.msg.data = msg_data;
++	req.msg.data_len = input_length;
++
++	rsp = intf->sendrecv(intf, &req);
++	if (rsp == NULL)
++	{
++		lprintf(LOG_ERR, " Error in getting SD Card Extended Information");
++		return -1;
++	}
++	else if (rsp->ccode > 0) 
++	{
++		lprintf(LOG_ERR, " Error in getting SD Card Extended Information (%s) \n",
++				val2str(rsp->ccode, completion_code_vals) );
++		return -1;
++	}
++
++	sdcardinfoblock = (IPMI_DELL_SDCARD_INFO *) (void *) rsp->data;
++
++	if( (iDRAC_FLAG == IDRAC_12G) && (sdcardinfoblock->vflashcompcode == VFL_NOT_LICENSED))
++	{
++		printf("FM001 : A required license is missing or expired\n");
++		return -1;	
++	}
++	else if (sdcardinfoblock->vflashcompcode != 0x00)
++	{
++		lprintf(LOG_ERR, " Error in getting SD Card Extended Information (%s) \n", get_vFlash_compcode_str(sdcardinfoblock->vflashcompcode,
++					vFlash_completion_code_vals));
++		return -1;
++	}
++
++	if (!(sdcardinfoblock->sdcardstatus & 0x04))
++	{
++		lprintf(LOG_ERR, " vFlash SD card is unavailable, please insert the card\n of size 256MB or greater\n");
++		return 0;
++	}
++
++	printf("vFlash SD Card Properties\n");
++	printf("SD Card size       : %8dMB\n",sdcardinfoblock->sdcardsize);
++	printf("Available size     : %8dMB\n",sdcardinfoblock->sdcardavailsize);
++	printf("Initialized        : %10s\n", (sdcardinfoblock->sdcardstatus & 0x80) ?
++			"Yes" : "No");
++	printf("Licensed           : %10s\n", (sdcardinfoblock->sdcardstatus & 0x40) ?
++			"Yes" : "No");
++	printf("Attached           : %10s\n", (sdcardinfoblock->sdcardstatus & 0x20) ?
++			"Yes" : "No");
++	printf("Enabled            : %10s\n", (sdcardinfoblock->sdcardstatus & 0x10) ?
++			"Yes" : "No");
++	printf("Write Protected    : %10s\n", (sdcardinfoblock->sdcardstatus & 0x08) ?
++			"Yes" : "No");
++	cardstatus = sdcardinfoblock->sdcardstatus & 0x03;
++	printf("Health             : %10s\n", ((0x00 == cardstatus
++		) ? "OK" : ((cardstatus == 0x03) ? 
++			"Undefined" : ((cardstatus == 0x02) ? 
++				"Critical" : "Warning"))));
++	printf("Bootable partition : %10d\n",sdcardinfoblock->bootpartion);
++	return 0;
++}
++
++/*****************************************************************
++* Function Name: 	ipmi_delloem_vFlash_process
++*
++* Description: 	This function processes the args for vFlash subcmd
++* Input : intf - ipmi interface, arg index, argv array
++* Output: prints help or error with help
++* Return: 0 - Success -1 - failure
++*
++******************************************************************/
++static int
++ipmi_delloem_vFlash_process(struct ipmi_intf* intf, int current_arg, char ** argv) {
++	int rc;
++
++	if (strncmp(intf->name,"wmi\0",4) &&
++		strncmp(intf->name, "open\0",5))
++	{
++		lprintf(LOG_ERR, " vFlash support is enabled only for wmi and open interface.\n Its not enabled for lan and lanplus interface.");
++		return -1;
++	}
++
++	if (argv[current_arg] == NULL)
++	{
++		ipmi_vFlash_usage();
++		return -1;
++	}
++	else if (!strncmp(argv[current_arg], "info\0", 5))
++	{
++		current_arg++;
++		if (argv[current_arg] == NULL)
++		{
++			ipmi_vFlash_usage();
++			return -1;
++		}
++		else if (strncmp(argv[current_arg], "Card\0", 5) == 0)
++		{
++			current_arg++;
++			if (argv[current_arg] != NULL)
++			{
++				ipmi_vFlash_usage();
++				return -1;
++			}
++			rc = ipmi_get_sd_card_info(intf);
++			return rc;
++		}
++		else /* TBD: many sub commands are present */
++		{
++			ipmi_vFlash_usage();
++			return -1;
++		}
++	}
++	/* TBD other vFlash subcommands */
++	else if (!strncmp(argv[current_arg], "help\0", 5))
++	{
++		ipmi_vFlash_usage();
++		return 0;
++	}
++	else
++	{
++		ipmi_vFlash_usage();
++		return -1;
++	}
++}
++
++/*****************************************************************
++* Function Name: 	ipmi_vFlash_usage
++*
++* Description: 	This function displays the usage for using vFlash
++* Input : void
++* Output: prints help		
++* Return: void	
++*
++******************************************************************/
++static void
++ipmi_vFlash_usage(void)
++{
++	lprintf(LOG_NOTICE, "");
++	lprintf(LOG_NOTICE, "   vFlash info Card");
++	lprintf(LOG_NOTICE, "      Shows Extended SD Card information");
++	lprintf(LOG_NOTICE, "");
++}
+ 
+ /**********************************************************************
+ * Function Name: ipmi_setled_usage
