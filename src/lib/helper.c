@@ -44,6 +44,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <assert.h>
 
 #if HAVE_CONFIG_H
 # include <config.h>
@@ -356,6 +357,7 @@ int str2char(const char *str, int8_t * chr_ptr)
 	if (arg_long < INT8_MIN || arg_long > INT8_MAX) {
 		return (-3);
 	}
+	*chr_ptr = (uint8_t)arg_long;
 	return 0;
 } /* str2char(...) */
 
@@ -663,9 +665,10 @@ ipmi_start_daemon(struct ipmi_intf *intf)
 			close(fd);
 	}
 
-	open("/dev/null", O_RDWR);
-	dup(0);
-	dup(0);
+	fd = open("/dev/null", O_RDWR);
+	assert(0 == fd);
+	dup(fd);
+	dup(fd);
 }
 
 /* is_fru_id - wrapper for str-2-int FRU ID conversion. Message is printed
@@ -755,4 +758,33 @@ is_ipmi_user_id(const char *argv_ptr, uint8_t *ipmi_uid_ptr)
 	lprintf(LOG_ERR, "User ID is limited to range <%i..%i>.",
 			IPMI_UID_MIN, IPMI_UID_MAX);
 	return (-1);
+}
+
+uint16_t
+ipmi_get_oem_id(struct ipmi_intf *intf)
+{
+	/* Execute a Get Board ID command to determine the board */
+	struct ipmi_rs *rsp;
+	struct ipmi_rq req;
+	uint16_t oem_id;
+
+	memset(&req, 0, sizeof(req));
+	req.msg.netfn = IPMI_NETFN_TSOL;
+	req.msg.cmd   = 0x21;
+	req.msg.data_len = 0;
+
+	rsp = intf->sendrecv(intf, &req);
+	if (rsp == NULL) {
+		lprintf(LOG_ERR, "Get Board ID command failed");
+		return 0;
+	}
+	if (rsp->ccode > 0) {
+		lprintf(LOG_ERR, "Get Board ID command failed: %#x %s",
+			rsp->ccode, val2str(rsp->ccode, completion_code_vals));
+		return 0;
+	}
+	oem_id = rsp->data[0] | (rsp->data[1] << 8);
+	lprintf(LOG_DEBUG,"Board ID: %x", oem_id);
+
+	return oem_id;
 }

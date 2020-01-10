@@ -1,7 +1,9 @@
+%global _hardened_build 1
+
 Name:         ipmitool
 Summary:      Utility for IPMI control
-Version:      1.8.13
-Release:      9%{?dist}
+Version:      1.8.15
+Release:      7%{?dist}
 License:      BSD
 Group:        System Environment/Base
 URL:          http://ipmitool.sourceforge.net/
@@ -25,25 +27,25 @@ Requires(postun): systemd-units
 Obsoletes: OpenIPMI-tools < 2.0.14-3
 Provides: OpenIPMI-tools = 2.0.14-3
 
-Patch1: ipmitool-1.8.10-ipmievd-init.patch
-Patch2: ipmitool-1.8.10-ipmievd-condrestart.patch
-Patch3: ipmitool-1.8.11-remove-umask0.patch
-# various threads. still pending.
-#Patch4: cxoem-jb-cx6.patch
-# pending
-#Patch5: ipmitool-1.8.12-fips.patch
-# pending
-#Patch6: ipmitool-1.8.12-fipsman.patch
-# pending https://sourceforge.net/p/ipmitool/bugs/280/
-Patch7: ipmitool-1.8.13-dualbridgedoc.patch
-# pending http://sourceforge.net/p/ipmitool/bugs/289/
-Patch8: ipmitool-1.8.13-bmc-snmp.patch
-# todo
-Patch9: ipmitool-1.8.13-set-kg-key1.patch
-# todo
-#Patch10: ipmitool-1.8.11-set-kg-key2.patch
-Patch11: ipmitool-1.8.13-bootparam.patch
-Patch12: 0012-ID-325-DDR4-DIMM-Decoding-Logic.patch
+Patch1:  0001-ipmitool-1.8.10-ipmievd-init.patch.patch
+Patch2:  0002-ipmitool-1.8.10-ipmievd-condrestart.patch.patch
+Patch3:  0003-ipmitool-1.8.11-ipmieved-pidfile.patch.patch
+Patch4:  0004-ipmitool-1.8.11-set-kg-key.patch.patch
+Patch5:  0005-ipmitool-1.8.11-set-kg-key2.patch.patch
+Patch6:  0006-ipmitool-1.8.11-sol-leak.patch.patch
+Patch7:  0007-ipmitool-1.8.11-remove-umask0.patch.patch
+Patch8:  0008-ipmitool-1.8.11-no-work-setaccess.patch.patch
+Patch9:  0009-ipmitool-1.8.11-bz1126333-slowswid.patch.patch
+Patch10: 0010-ipmitool-1.8.11-bz878614-overname.patch.patch
+Patch11: 0011-ipmitool-1.8.13-bmc-snmp.patch.patch
+Patch12: 0012-Avoid-assert-on-mismatched-session-ID.patch
+Patch13: 0013-ID-405-Use-meaningful-Generator-ID-for-ipmitool-sel-.patch
+Patch14: 0014-ID-382-Fix-memcpy-params-in-HpmFwupgActionUploadFirm.patch
+Patch15: 0015-ID-390-Support-for-new-Communication-Interface-USB-M.patch
+Patch16: 0016-ID-394-plugins-usb-Fix-probe-for-SCSI-devices.patch
+Patch17: 0017-Fix-missing-return-in-ipmi_kontronoem_main-CID-12613.patch
+Patch18: 0018-ID-437-sel-Fix-sel-time-set-time.patch
+Patch19: 0019-ID-408-fix-sel-list-last-X-listing.patch
 
 %description
 This package contains a utility for interfacing with devices that support
@@ -92,18 +94,26 @@ for the host OS to use.
 %prep
 
 %setup -q
-%patch1 -p1 -b .ipmievd-init
-%patch2 -p0 -b .condrestart
-%patch3 -p1 -b .umask
-#patch4 -p1 -b .cxoem
-#patch5 -p0 -b .fips
-#patch6 -p0 -b .fipsman
-%patch7 -p1 -b .dualbridgedoc
-%patch8 -p1 -b .bmcsnmp
-%patch9 -p1 -b .kg1
-#patch10 -p1 -b .kegkey2
-%patch11 -p1 -b .bootparam
+
+%patch1 -p1
+%patch2 -p1
+%patch3 -p1
+%patch4 -p1
+%patch5 -p1
+%patch6 -p1
+%patch7 -p1
+%patch8 -p1
+%patch9 -p1
+%patch10 -p1
+%patch11 -p1
 %patch12 -p1
+%patch13 -p1
+%patch14 -p1
+%patch15 -p1
+%patch16 -p1
+%patch17 -p1
+%patch18 -p1
+%patch19 -p1
 
 for f in AUTHORS ChangeLog; do
     iconv -f iso-8859-1 -t utf8 < ${f} > ${f}.utf8
@@ -195,9 +205,33 @@ install -Dm 755 contrib/bmc-snmp-proxy         %{buildroot}%{_libexecdir}/bmc-sn
 %{_libexecdir}/bmc-snmp-proxy
 
 %changelog
-* Tue Aug 16 2016 Boris Ranto <branto@redhat.com> - 0:1.8.13-9
-- New release (0:1.8.13-9)
-- ID: 325 DDR4 DIMM Decoding Logic
+* Tue May 03 2016 Boris Ranto <branto@redhat.com> - 0:1.8.15-7
+- New release (0:1.8.15-7)
+- ID:437 - sel: Fix "sel time set <time>"
+- ID 408 - fix sel list last X listing
+
+* Thu Mar 24 2016 Boris Ranto <branto@redhat.com> - 1.8.15-6
+- Fix missing return in ipmi_kontronoem_main() - CID#1261317
+
+* Fri Feb 19 2016 Boris Ranto <branto@redhat.com> - 1.8.15-5
+- allow to upgrade the latest HPM files using usb options
+- resolves: rhbz#1257316
+
+* Thu Feb 18 2016 Boris Ranto <branto@redhat.com> - 1.8.15-4
+- use meaningful generator ID for ipmitool sel
+- resolves: rhbz#1289507
+
+* Thu Feb 18 2016 Boris Ranto <branto@redhat.com> - 1.8.15-3
+- perform a hardened build
+- resolves: rhbz#1092551
+
+* Thu Feb 18 2016 Boris Ranto <branto@redhat.com> - 1.8.15-2
+- avoid assert on mismatched session ID
+- resolves: rhbz#1286035
+
+* Fri Dec 11 2015 Boris Ranto <branto@redhat.com> - 1.8.15-1
+- rebase to latest stable upstream version
+- resolves: rhbz#1269523
 
 * Mon Mar 09 2015 Ales Ledvinka <aledvink@redhat.com> - 1.8.13-8
 - Chassis boot parameter settings support.

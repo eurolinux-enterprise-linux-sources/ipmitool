@@ -42,7 +42,8 @@
 #include <ipmitool/ipmi_sensor.h>
 
 extern int verbose;
-void printf_sensor_get_usage();
+void print_sensor_get_usage();
+void print_sensor_thresh_usage();
 
 // Macro's for Reading the current sensor Data.
 #define SCANNING_DISABLED	0x40
@@ -110,7 +111,8 @@ ipmi_sensor_set_sensor_thresholds(struct ipmi_intf *intf,
 	struct ipmi_rq req;
 	static struct sensor_set_thresh_rq set_thresh_rq;
 	struct ipmi_rs *rsp;
-	uint32_t save_addr = 0;
+	uint8_t  bridged_request = 0;
+	uint32_t save_addr;
 	uint32_t save_channel;
 
 	memset(&set_thresh_rq, 0, sizeof (set_thresh_rq));
@@ -132,6 +134,7 @@ ipmi_sensor_set_sensor_thresholds(struct ipmi_intf *intf,
 		return NULL;
 
 	if (BRIDGE_TO_SENSOR(intf, target, channel)) {
+		bridged_request = 1;
 		save_addr = intf->target_addr;
 		intf->target_addr = target;
 		save_channel = intf->target_channel;
@@ -145,7 +148,7 @@ ipmi_sensor_set_sensor_thresholds(struct ipmi_intf *intf,
 	req.msg.data_len = sizeof (set_thresh_rq);
 
 	rsp = intf->sendrecv(intf, &req);
-	if (save_addr) {
+	if (bridged_request) {
 		intf->target_addr = save_addr;
 		intf->target_channel = save_channel;
 	}
@@ -513,7 +516,6 @@ __ipmi_sensor_threshold_value_to_raw(struct sdr_record_full_sensor *full, double
 	}
 }
 
-
 static int
 ipmi_sensor_set_threshold(struct ipmi_intf *intf, int argc, char **argv)
 {
@@ -529,33 +531,7 @@ ipmi_sensor_set_threshold(struct ipmi_intf *intf, int argc, char **argv)
 	struct sdr_record_list *sdr;
 
 	if (argc < 3 || strncmp(argv[0], "help", 4) == 0) {
-		lprintf(LOG_NOTICE, "sensor thresh <id> <threshold> <setting>");
-		lprintf(LOG_NOTICE,
-			"   id        : name of the sensor for which threshold is to be set");
-		lprintf(LOG_NOTICE, "   threshold : which threshold to set");
-		lprintf(LOG_NOTICE,
-			"                 unr = upper non-recoverable");
-		lprintf(LOG_NOTICE, "                 ucr = upper critical");
-		lprintf(LOG_NOTICE,
-			"                 unc = upper non-critical");
-		lprintf(LOG_NOTICE,
-			"                 lnc = lower non-critical");
-		lprintf(LOG_NOTICE, "                 lcr = lower critical");
-		lprintf(LOG_NOTICE,
-			"                 lnr = lower non-recoverable");
-		lprintf(LOG_NOTICE,
-			"   setting   : the value to set the threshold to");
-		lprintf(LOG_NOTICE, "");
-		lprintf(LOG_NOTICE,
-			"sensor thresh <id> lower <lnr> <lcr> <lnc>");
-		lprintf(LOG_NOTICE,
-			"   Set all lower thresholds at the same time");
-		lprintf(LOG_NOTICE, "");
-		lprintf(LOG_NOTICE,
-			"sensor thresh <id> upper <unc> <ucr> <unr>");
-		lprintf(LOG_NOTICE,
-			"   Set all upper thresholds at the same time");
-		lprintf(LOG_NOTICE, "");
+		print_sensor_thresh_usage();
 		return 0;
 	}
 
@@ -587,7 +563,7 @@ ipmi_sensor_set_threshold(struct ipmi_intf *intf, int argc, char **argv)
 	} else if (strncmp(thresh, "lower", 5) == 0) {
 		if (argc < 5) {
 			lprintf(LOG_ERR,
-				"usage: sensor thresh <id> lower <unc> <ucr> <unr>");
+				"usage: sensor thresh <id> lower <lnr> <lcr> <lnc>");
 			return -1;
 		}
 		allLower = 1;
@@ -897,10 +873,10 @@ ipmi_sensor_get(struct ipmi_intf *intf, int argc, char **argv)
 
 	if (argc < 1) {
 		lprintf(LOG_ERR, "Not enough parameters given.");
-		printf_sensor_get_usage();
+		print_sensor_get_usage();
 		return (-1);
 	} else if (strcmp(argv[0], "help") == 0) {
-		printf_sensor_get_usage();
+		print_sensor_get_usage();
 		return 0;
 	}
 	printf("Locating sensor record...\n");
@@ -950,13 +926,55 @@ ipmi_sensor_main(struct ipmi_intf *intf, int argc, char **argv)
 	return rc;
 }
 
-/* printf_sensor_get_usage - print usage for # ipmitool sensor get NAC;
+/* print_sensor_get_usage - print usage for # ipmitool sensor get NAC;
  *
  * @returns: void
  */
 void
-printf_sensor_get_usage()
+print_sensor_get_usage()
 {
 	lprintf(LOG_NOTICE, "sensor get <id> ... [id]");
 	lprintf(LOG_NOTICE, "   id        : name of desired sensor");
+}
+
+/* print_sensor_thresh_set_usage - print usage for # ipmitool sensor thresh;
+ *
+ * @returns: void
+ */
+void
+print_sensor_thresh_usage()
+{
+	lprintf(LOG_NOTICE,
+"sensor thresh <id> <threshold> <setting>");
+	lprintf(LOG_NOTICE,
+"   id        : name of the sensor for which threshold is to be set");
+	lprintf(LOG_NOTICE,
+"   threshold : which threshold to set");
+	lprintf(LOG_NOTICE,
+"                 unr = upper non-recoverable");
+	lprintf(LOG_NOTICE,
+"                 ucr = upper critical");
+	lprintf(LOG_NOTICE,
+"                 unc = upper non-critical");
+	lprintf(LOG_NOTICE,
+"                 lnc = lower non-critical");
+	lprintf(LOG_NOTICE,
+"                 lcr = lower critical");
+	lprintf(LOG_NOTICE,
+"                 lnr = lower non-recoverable");
+	lprintf(LOG_NOTICE,
+"   setting   : the value to set the threshold to");
+	lprintf(LOG_NOTICE,
+"");
+	lprintf(LOG_NOTICE,
+"sensor thresh <id> lower <lnr> <lcr> <lnc>");
+	lprintf(LOG_NOTICE,
+"   Set all lower thresholds at the same time");
+	lprintf(LOG_NOTICE,
+"");
+	lprintf(LOG_NOTICE,
+"sensor thresh <id> upper <unc> <ucr> <unr>");
+	lprintf(LOG_NOTICE,
+"   Set all upper thresholds at the same time");
+	lprintf(LOG_NOTICE, "");
 }

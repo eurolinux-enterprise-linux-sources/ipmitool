@@ -1,6 +1,19 @@
-diff -up ipmitool-1.8.10/contrib/ipmievd.init.redhat.ipmievd-init ipmitool-1.8.10/contrib/ipmievd.init.redhat
---- ipmitool-1.8.10/contrib/ipmievd.init.redhat.ipmievd-init	2006-03-20 00:05:48.000000000 +0100
-+++ ipmitool-1.8.10/contrib/ipmievd.init.redhat	2008-10-14 13:46:35.000000000 +0200
+From 88c6180c807bcdcbe5a189fa7a2a7432cd3a750d Mon Sep 17 00:00:00 2001
+From: Boris Ranto <branto@redhat.com>
+Date: Fri, 6 Nov 2015 12:06:52 +0100
+Subject: [PATCH 01/11] ipmitool-1.8.10-ipmievd-init.patch
+
+562186 - Initscript of the ipmievd service not LSB compliant
+
+Backported by: dgregor jsafrane
+---
+ contrib/ipmievd.init.redhat | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/contrib/ipmievd.init.redhat b/contrib/ipmievd.init.redhat
+index 1c0253d..7cf9d24 100755
+--- a/contrib/ipmievd.init.redhat
++++ b/contrib/ipmievd.init.redhat
 @@ -5,7 +5,7 @@
  #       Based on example sysvinitfiles script
  #       Copyright (c) 2000 Red Hat Software, Inc.
@@ -21,7 +34,7 @@ diff -up ipmitool-1.8.10/contrib/ipmievd.init.redhat.ipmievd-init ipmitool-1.8.1
  # Short-Description: ipmievd daemon to send events to syslog
  # Description:       Start ipmievd to read events from BMC and
  #	             log them to syslog.  Events correspond to hardware faults,
-@@ -85,7 +85,7 @@ case "$1" in
+@@ -81,7 +81,7 @@ case "$1" in
  	;;
      *)
  	echo "Usage: ipmievd {start|stop|status|reload|restart|condrestart}"
@@ -30,3 +43,6 @@ diff -up ipmitool-1.8.10/contrib/ipmievd.init.redhat.ipmievd-init ipmitool-1.8.1
  	;;
  esac
  exit $?
+-- 
+2.1.0
+

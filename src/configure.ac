@@ -3,7 +3,7 @@ dnl autoconf for ipmitool
 dnl
 AC_INIT([src/ipmitool.c])
 AC_CANONICAL_SYSTEM
-AM_INIT_AUTOMAKE([ipmitool], [1.8.13])
+AM_INIT_AUTOMAKE([ipmitool], [1.8.15])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_SRCDIR([src/ipmitool.c])
 AC_PREREQ(2.50)
@@ -29,7 +29,7 @@ AC_C_BIGENDIAN
 AC_FUNC_MALLOC
 AC_FUNC_SELECT_ARGTYPES
 AC_FUNC_STRTOD
-AC_CHECK_FUNCS([alarm gethostbyname socket select])
+AC_CHECK_FUNCS([alarm gethostbyname getaddrinfo getifaddrs socket select])
 AC_CHECK_FUNCS([memmove memset strchr strdup strerror])
 AC_CHECK_FUNCS([getpassphrase])
 
@@ -39,6 +39,8 @@ AM_PROG_LIBTOOL
 LIBTOOL="$LIBTOOL --silent"
 
 AC_SEARCH_LIBS([gethostbyname], [nsl])
+AC_SEARCH_LIBS([getaddrinfo], [nsl])
+AC_SEARCH_LIBS([getifaddrs], [nsl])
 AC_SEARCH_LIBS([socket], [socket], [],
 	[AC_CHECK_LIB([nsl], [socket],
 		[LIBS="$LIBS -lsocket -lnsl"], [], [-lsocket])])
@@ -60,6 +62,7 @@ xenable_intf_imb=yes
 xenable_intf_open=yes
 xenable_intf_lipmi=yes
 #xenable_intf_serial=yes
+xenable_intf_dummy=no
 xenable_all_options=yes
 xenable_ipmishell=yes
 
@@ -104,6 +107,11 @@ solaris*)
 	xenable_intf_imb=no
 	xenable_intf_lipmi=no
 	xenable_intf_bmc=no
+	xenable_intf_open=no
+	;;
+gnu*)
+	# disable the linux and solaris-specific interfaces on Hurd
+	xenable_intf_imb=no
 	xenable_intf_open=no
 	;;
 esac
@@ -503,6 +511,18 @@ if test "x$xenable_intf_bmc" = "xyes"; then
 	IPMITOOL_INTF_LIB="$IPMITOOL_INTF_LIB bmc/libintf_bmc.la"
 fi
 
+dnl enable Dummy interface for testing
+AC_ARG_ENABLE([intf-dummy],
+	[AC_HELP_STRING([--enable-intf-dummy],
+			[enable Dummy(test) interface [default=no]])],
+	[xenable_intf_dummy=$enableval], [xenable_intf_dummy=no])
+if test "x$xenable_intf_dummy" = "xyes"; then
+	AC_DEFINE(IPMI_INTF_DUMMY, [1], [Define to 1 to enable Dummy interface.])
+	AC_SUBST(INTF_DUMMY, [dummy])
+	AC_SUBST(INTF_DUMMY_LIB, [libintf_dummy.la])
+	IPMITOOL_INTF_LIB="$IPMITOOL_INTF_LIB dummy/libintf_dummy.la"
+fi
+
 AC_SUBST(IPMITOOL_INTF_LIB)
 
 if test "x$xenable_ipmishell" = "xyes"; then
@@ -602,7 +622,8 @@ AC_CONFIG_FILES([Makefile
 		src/plugins/imb/Makefile
 		src/plugins/bmc/Makefile
 		src/plugins/lipmi/Makefile
-		src/plugins/serial/Makefile])
+		src/plugins/serial/Makefile
+		src/plugins/dummy/Makefile])
 
 AC_OUTPUT
 
@@ -618,6 +639,7 @@ AC_MSG_RESULT([  imb     : $xenable_intf_imb])
 AC_MSG_RESULT([  bmc     : $xenable_intf_bmc])
 AC_MSG_RESULT([  lipmi   : $xenable_intf_lipmi])
 AC_MSG_RESULT([  serial  : $xenable_intf_serial])
+AC_MSG_RESULT([  dummy   : $xenable_intf_dummy])
 AC_MSG_RESULT([])
 AC_MSG_RESULT([Extra tools])
 AC_MSG_RESULT([  ipmievd   : yes])

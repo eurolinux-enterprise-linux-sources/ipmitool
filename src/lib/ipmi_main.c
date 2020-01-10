@@ -125,8 +125,8 @@ ipmi_password_file_read(char * filename)
 		return NULL;
 	}
 
-	/* remove trailing whitespace */
-	l = strcspn(pass, " \r\n\t");
+        /* remove traling <cr><nl><tab> */
+	l = strcspn(pass, "\r\n\t");
 	if (l > 0) {
 		pass[l] = '\0';
 	}
@@ -361,7 +361,8 @@ ipmi_main(int argc, char ** argv,
 	uint8_t transit_addr = 0;
 	uint8_t transit_channel = 0;
 	uint8_t target_lun     = 0;
-	uint8_t arg_addr = 0, addr;
+	uint8_t arg_addr = 0;
+	uint8_t addr = 0;
 	uint16_t my_long_packet_size=0;
 	uint8_t my_long_packet_set=0;
 	uint8_t lookupbit = 0x10;	/* use name-only lookup by default */
@@ -894,9 +895,11 @@ ipmi_main(int argc, char ** argv,
 
 	/* Open the interface with the specified or default IPMB address */
 	ipmi_main_intf->my_addr = arg_addr ? arg_addr : IPMI_BMC_SLAVE_ADDR;
-	if (ipmi_main_intf->open != NULL)
-		ipmi_main_intf->open(ipmi_main_intf);
-
+	if (ipmi_main_intf->open != NULL) {
+		if (ipmi_main_intf->open(ipmi_main_intf) < 0) {
+			goto out_free;
+		}
+	}
 	/*
 	 * Attempt picmg discovery of the actual interface address unless
 	 * the users specified an address.
@@ -923,24 +926,26 @@ ipmi_main(int argc, char ** argv,
 	}
 
 	/* If bridging addresses are specified, handle them */
-	if (transit_addr > 0 || target_addr > 0) {
+	if (target_addr > 0) {
+		ipmi_main_intf->target_addr = target_addr;
+		ipmi_main_intf->target_lun = target_lun ;
+		ipmi_main_intf->target_channel = target_channel ;
+	}
+	if (transit_addr > 0) {
 		/* sanity check, transit makes no sense without a target */
 		if ((transit_addr != 0 || transit_channel != 0) &&
-			target_addr == 0) {
+			ipmi_main_intf->target_addr == 0) {
 			lprintf(LOG_ERR,
 				"Transit address/channel %#x/%#x ignored. "
 				"Target address must be specified!",
 				transit_addr, transit_channel);
 			goto out_free;
 		}
-		ipmi_main_intf->target_addr = target_addr;
-		ipmi_main_intf->target_lun = target_lun ;
-		ipmi_main_intf->target_channel = target_channel ;
 
 		ipmi_main_intf->transit_addr    = transit_addr;
 		ipmi_main_intf->transit_channel = transit_channel;
-
-
+	}
+	if (ipmi_main_intf->target_addr > 0) {
 		/* must be admin level to do this over lan */
 		ipmi_intf_session_set_privlvl(ipmi_main_intf, IPMI_SESSION_PRIV_ADMIN);
 		/* Get the ipmb address of the targeted entity */
@@ -977,13 +982,15 @@ ipmi_main(int argc, char ** argv,
 	}
 
 	/* Enable Big Buffer when requested */
-	ipmi_main_intf->channel_buf_size = 0;
 	if ( my_long_packet_size != 0 ) {
-		printf("Setting large buffer to %i\n", my_long_packet_size);
-		if (ipmi_kontronoem_set_large_buffer( ipmi_main_intf, my_long_packet_size ) == 0)
-		{
+		/* Enable Big Buffer when requested */
+		if (!ipmi_oem_active(ipmi_main_intf, "kontron") ||
+			ipmi_kontronoem_set_large_buffer(ipmi_main_intf,
+					my_long_packet_size ) == 0) {
+			printf("Setting large buffer to %i\n", my_long_packet_size);
 			my_long_packet_set = 1;
-			ipmi_main_intf->channel_buf_size = my_long_packet_size;
+			ipmi_intf_set_max_request_data_size(ipmi_main_intf,
+					my_long_packet_size);
 		}
 	}
 
@@ -997,8 +1004,10 @@ ipmi_main(int argc, char ** argv,
 		rc = ipmi_cmd_run(ipmi_main_intf, NULL, 0, NULL);
 
 	if (my_long_packet_set == 1) {
-		/* Restore defaults */
-		ipmi_kontronoem_set_large_buffer( ipmi_main_intf, 0 );
+		if (ipmi_oem_active(ipmi_main_intf, "kontron")) {
+			/* Restore defaults */
+			ipmi_kontronoem_set_large_buffer( ipmi_main_intf, 0 );
+		}
 	}
 
 	/* clean repository caches */

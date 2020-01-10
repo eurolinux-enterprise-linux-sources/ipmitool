@@ -65,6 +65,22 @@
 # include "open.h"
 #endif
 
+/**
+ * Maximum input message size for KCS/SMIC is 40 with 2 utility bytes and
+ * 38 bytes of data.
+ * Maximum input message size for BT is 42 with 4 utility bytes and
+ * 38 bytes of data.
+ */
+#define IPMI_OPENIPMI_MAX_RQ_DATA_SIZE 38
+
+/**
+ * Maximum output message size for KCS/SMIC is 38 with 2 utility bytes, a byte
+ * for completion code and 35 bytes of data.
+ * Maximum output message size for BT is 40 with 4 utility bytes, a byte
+ * for completion code and 35 bytes of data.
+ */
+#define IPMI_OPENIPMI_MAX_RS_DATA_SIZE 35
+
 extern int verbose;
 
 static int
@@ -172,9 +188,14 @@ ipmi_openipmi_send_cmd(struct ipmi_intf * intf, struct ipmi_rq * req)
 		if (intf->open(intf) < 0)
 			return NULL;
 
-	if (verbose > 2)
-		printbuf(req->msg.data, req->msg.data_len,
-			 "OpenIPMI Request Message");
+	if (verbose > 2) {
+		fprintf(stderr, "OpenIPMI Request Message Header:\n");
+		fprintf(stderr, "  netfn     = 0x%x\n",  req->msg.netfn );
+		fprintf(stderr, "  cmd       = 0x%x\n", req->msg.cmd);
+		printbuf(req->msg.data, req->msg.data_len, "OpenIPMI Request Message Data");
+	}
+		
+
 
 	/*
 	 * setup and send message
@@ -187,8 +208,9 @@ ipmi_openipmi_send_cmd(struct ipmi_intf * intf, struct ipmi_rq * req)
 		/* use IPMB address if needed */
 		ipmb_addr.slave_addr = intf->target_addr;
 		ipmb_addr.lun = req->msg.lun;
-		lprintf(LOG_DEBUG, "Sending request to "
+		lprintf(LOG_DEBUG, "Sending request 0x%x to "
 			"IPMB target @ 0x%x:0x%x (from 0x%x)", 
+			req->msg.cmd,
 			intf->target_addr,intf->target_channel, intf->my_addr);
 
 		if(intf->transit_addr != 0 && intf->transit_addr != intf->my_addr) { 
@@ -210,7 +232,7 @@ ipmi_openipmi_send_cmd(struct ipmi_intf * intf, struct ipmi_rq * req)
 		      fprintf(stderr, "Converting message:\n");
 		      fprintf(stderr, "  netfn     = 0x%x\n",  req->msg.netfn );
 		      fprintf(stderr, "  cmd       = 0x%x\n", req->msg.cmd);
-		      if (recv.msg.data && recv.msg.data_len) {
+		      if (req->msg.data && req->msg.data_len) {
 			 fprintf(stderr, "  data_len  = %d\n", req->msg.data_len);
 			 fprintf(stderr, "  data      = %s\n",
 				 buf2str(req->msg.data,req->msg.data_len));
@@ -257,8 +279,8 @@ ipmi_openipmi_send_cmd(struct ipmi_intf * intf, struct ipmi_rq * req)
 		_req.addr_len = sizeof(ipmb_addr);
 	} else {
 	   /* otherwise use system interface */
-	   lprintf(LOG_DEBUG+2, "Sending request to "
-		   "System Interface");
+	   lprintf(LOG_DEBUG+2, "Sending request 0x%x to "
+		   "System Interface", req->msg.cmd);
 	   bmc_addr.lun = req->msg.lun;
 	   _req.addr = (unsigned char *) &bmc_addr;
 	   _req.addr_len = sizeof(bmc_addr);
@@ -389,7 +411,7 @@ ipmi_openipmi_send_cmd(struct ipmi_intf * intf, struct ipmi_rq * req)
 	/* save response data for caller */
 	if (rsp.ccode == 0 && rsp.data_len > 0) {
 	   memmove(rsp.data, rsp.data + 1, rsp.data_len);
-	   rsp.data[recv.msg.data_len] = 0;
+	   rsp.data[rsp.data_len] = 0;
 	}
 
 	if (data != NULL) {
@@ -400,9 +422,19 @@ ipmi_openipmi_send_cmd(struct ipmi_intf * intf, struct ipmi_rq * req)
 	return &rsp;
 }
 
+int ipmi_openipmi_setup(struct ipmi_intf * intf)
+{
+	/* set default payload size */
+	intf->max_request_data_size = IPMI_OPENIPMI_MAX_RQ_DATA_SIZE;
+	intf->max_response_data_size = IPMI_OPENIPMI_MAX_RS_DATA_SIZE;
+
+	return 0;
+}
+
 struct ipmi_intf ipmi_open_intf = {
 	name:		"open",
 	desc:		"Linux OpenIPMI Interface",
+	setup:		ipmi_openipmi_setup,
 	open:		ipmi_openipmi_open,
 	close:		ipmi_openipmi_close,
 	sendrecv:	ipmi_openipmi_send_cmd,

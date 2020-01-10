@@ -1,4 +1,4 @@
-/* config.h.in.  Generated from configure.in by autoheader.  */
+/* config.h.in.  Generated from configure.ac by autoheader.  */
 
 /* Define if building universal (internal helper macro) */
 #undef AC_APPLE_UNIVERSAL_BUILD
@@ -36,8 +36,14 @@
 /* Define to 1 if you have the <sys/ipmi.h> header file. */
 #undef HAVE_FREEBSD_IPMI_H
 
+/* Define to 1 if you have the `getaddrinfo' function. */
+#undef HAVE_GETADDRINFO
+
 /* Define to 1 if you have the `gethostbyname' function. */
 #undef HAVE_GETHOSTBYNAME
+
+/* Define to 1 if you have the `getifaddrs' function. */
+#undef HAVE_GETIFADDRS
 
 /* Define to 1 if you have the `getpassphrase' function. */
 #undef HAVE_GETPASSPHRASE
@@ -139,6 +145,9 @@
 
 /* Define to 1 to enable Solaris 10 BMC interface. */
 #undef IPMI_INTF_BMC
+
+/* Define to 1 to enable Dummy interface. */
+#undef IPMI_INTF_DUMMY
 
 /* Define to 1 to enable FreeIPMI interface. */
 #undef IPMI_INTF_FREE

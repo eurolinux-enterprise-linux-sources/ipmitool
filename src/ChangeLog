@@ -1,3 +1,67 @@
+version 1.8.15 2014-11-24
+	* ID: 340 - ipmitool sol session improperly closes on packet retry
+	* ID: 277 - support for hostnames longer than 64 chars
+	* ID: 313 - ipmitool doesn't support hostname long than 64 symbols
+	* ID: 277 - Minor issue with ipmi_intf_session_set_hostname()
+	* ID: 247 - 'sensor thresh' help output is wrong
+	* ID: 324 - conflicting declaration write_fru_area()
+	* ID: 337 - Add support for 13G Dell PowerEdge
+	* ID: 325 - DDR4 DIMM Decoding Logic
+	* ID: 328 - HPM.2 fixes
+	* ID: 329 - hpm.1 upgrade fixes
+	* ID: 103 - picmg discover messages should be DEBUG, not INFO
+	* ID: 331 - Passwords provided in file (-f option) truncated on space
+	* ID: 318 - ipmi_tsol.c: fix buffer overflow
+	* ID: 306 - "fru print" command prints the FRU #0 twice
+	* ID: 305 - HPM.1 deferred activation support fixup
+	* ID: 317 - ipmi_fwum.c: fix typo
+	* ID: 315 - buildsystem: configure.in is deprecated
+	* ID: 316 - Directory debian is outdated
+	* ID: 103 - 'lib/ipmi_ekanalyzer.c' needs a re-work
+	* ID: 46 - SEL OEM record corner case
+
+version 1.8.14 2014-05-05
+	* ID: 299 - openipmi plugin writes zero to wrong byte
+	* ID: 301 - Add OS/Hypervisor installation status events
+	* ID: 298 - fix LANplus retry
+	* ID: 295 - inform user if SOL session disconnected
+	* ID: 297 - don't print-out SEL entry if ID not present
+	* ID: 296 - Fix PSD size decoding
+	* ID: 293 - Use of uninitialized variable in ipmi_main()
+	* ID: 278 - Error in sol looptest
+	* ID: 290 - ipmi_sol.c needs a clean-up
+	* ID: 85 - Supermicro memory ECC error display
+	* ID: 290 - ipmi_sol.c needs a clean-up
+	* ID: 286 - Open session retries hit assert in ipmi_lanplus_send_payload
+	* ID: 285 - Fix SEGV in ipmi_lanplus_open_session
+	* ID: 284 - Fix SEGV in ipmi_main
+	* ID: 283 - ipmi_intf_socket_connect fails with IPv4 hosts
+	* ID: 46 -  ipmi_fwum needs some re-work
+	* ID: 50 - ipmi_hpmfwupg needs a clean up
+	* ID: 279 - ipmitool sdr list broken
+	* ID: 44 - dummy interface support - fake-ipmistack project
+	* ID: 48 - Remove hard-coded FRU inventory access length restriction
+	* ID: 276 - HPM.1 upgrade combined patch
+	* ID: 90 - Add options to chassis bootparam set bootflag
+	* ID: 292 -Properly handle plugin non-zero target adddress with -t
+	* Numerous Fixes based on running Coverity
+	* Use TIOCFLUSH if TCFLSH is missing to get the serial plugin building on
+	  Hurd.
+	* Disable imb and open plugins by default on Hurd.  The platform lack
+	  the required kernel support.
+	* Change serial plugin to only try to disable the IUCLC serial line flag on
+	  platforms supporting it.  Fixes build problem on Hurd and FreeBSD.
+	* PA: 83 -  Revised IPv6 patch
+	* FR: 24 -  Exchange OS Name Hostname BMC URL during startup
+	* ID: 304 - Incorect byteswap in SOL maximum payload
+	* ID: 303 - Fix build error in HPM.2 code
+	* ID: 300 - new sunoem functionality
+	* ID: 144 - Fix 'dcmi power set_limit action <value>'
+	* ID: 302 - HPM.2 long message support
+	* ID: 309 - Add new SEL entries for ipmi 2.0 rev 1.1
+	* ID: 280 - man page cleanup
+	* ID: 311 - man page update for new sunoem commands
+
 version 1.8.13 2013-09-09
 	* ID: 3611905 - Direct Serial Basic/Terminal Mode Interface drivers
 	* ID: 3577766 - configure's knobs and switches don't work

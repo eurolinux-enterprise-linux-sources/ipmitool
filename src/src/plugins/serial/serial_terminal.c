@@ -211,8 +211,13 @@ ipmi_serial_term_open(struct ipmi_intf * intf)
 
 	/* no flow control */
 	ti.c_cflag &= ~CRTSCTS;
-	ti.c_iflag &= ~(IGNBRK | IGNCR | INLCR | ICRNL | IUCLC | INPCK | ISTRIP
+	ti.c_iflag &= ~(IGNBRK | IGNCR | INLCR | ICRNL | INPCK | ISTRIP
 			| IXON | IXOFF | IXANY);
+#ifdef IUCLC
+        /* Only disable uppercase-to-lowercase mapping on input for
+	   platforms supporting the flag. */
+	ti.c_iflag &= ~(IUCLC);
+#endif
 
 	ti.c_oflag &= ~(OPOST);
 	ti.c_lflag &= ~(ICANON | ISIG | ECHO | ECHONL | NOFLSH);
@@ -237,12 +242,7 @@ ipmi_serial_term_close(struct ipmi_intf * intf)
 		close(intf->fd);
 		intf->fd = -1;
 	}
-
-	if (intf->session) {
-		free(intf->session);
-		intf->session = NULL;
-	}
-
+	ipmi_intf_session_cleanup(intf);
 	intf->opened = 0;
 }
 
@@ -337,7 +337,14 @@ serial_write_line(struct ipmi_intf * intf, const char *str)
 static int
 serial_flush(struct ipmi_intf * intf)
 {
+#if defined(TCFLSH)
     return ioctl(intf->fd, TCFLSH, TCIOFLUSH);
+#elif defined(TIOCFLUSH)
+    return ioctl(intf->fd, TIOCFLUSH);
+#else
+#   error "unsupported platform, missing flush support (TCFLSH/TIOCFLUSH)"
+#endif
+
 }
 
 /*
@@ -882,6 +889,10 @@ ipmi_serial_term_setup(struct ipmi_intf * intf)
 	}
 
 	memset(intf->session, 0, sizeof(struct ipmi_session));
+
+	/* setup default LAN maximum request and response sizes */
+	intf->max_request_data_size = IPMI_SERIAL_MAX_RQ_SIZE;
+	intf->max_response_data_size = IPMI_SERIAL_MAX_RS_SIZE;
 	return 0;
 }
 

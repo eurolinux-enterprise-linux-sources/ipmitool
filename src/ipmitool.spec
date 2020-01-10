@@ -1,6 +1,6 @@
 Name:         ipmitool
 Summary:      ipmitool - Utility for IPMI control
-Version:      1.8.13
+Version:      1.8.15
 Release:      1%{?_distro:.%{_distro}}
 License:      BSD
 Group:        Utilities

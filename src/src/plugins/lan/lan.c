@@ -52,6 +52,7 @@
 #include <ipmitool/ipmi_oem.h>
 #include <ipmitool/ipmi_strings.h>
 #include <ipmitool/ipmi_constants.h>
+#include <ipmitool/hpm2.h>
 
 #if HAVE_CONFIG_H
 # include <config.h>
@@ -66,6 +67,13 @@
 #define IPMI_LAN_RETRY		4
 #define IPMI_LAN_PORT		0x26f
 #define IPMI_LAN_CHANNEL_E	0x0e
+
+/*
+ * LAN interface is required to support 45 byte request transactions and
+ * 42 byte response transactions.
+ */
+#define IPMI_LAN_MAX_REQUEST_SIZE	38	/* 45 - 7 */
+#define IPMI_LAN_MAX_RESPONSE_SIZE	34	/* 42 - 8 */
 
 extern const struct valstr ipmi_privlvl_vals[];
 extern const struct valstr ipmi_authtype_session_vals[];
@@ -88,6 +96,8 @@ static int ipmi_lan_send_rsp(struct ipmi_intf * intf, struct ipmi_rs * rsp);
 static int ipmi_lan_open(struct ipmi_intf * intf);
 static void ipmi_lan_close(struct ipmi_intf * intf);
 static int ipmi_lan_ping(struct ipmi_intf * intf);
+static void ipmi_lan_set_max_rq_data_size(struct ipmi_intf * intf, uint16_t size);
+static void ipmi_lan_set_max_rp_data_size(struct ipmi_intf * intf, uint16_t size);
 
 struct ipmi_intf ipmi_lan_intf = {
 	name:		"lan",
@@ -100,6 +110,8 @@ struct ipmi_intf ipmi_lan_intf = {
 	recv_sol:	ipmi_lan_recv_sol,
 	send_sol:	ipmi_lan_send_sol,
 	keepalive:	ipmi_lan_keepalive,
+	set_max_request_data_size: ipmi_lan_set_max_rq_data_size,
+	set_max_response_data_size: ipmi_lan_set_max_rp_data_size,
 	target_addr:	IPMI_BMC_SLAVE_ADDR,
 };
 
@@ -1993,12 +2005,7 @@ ipmi_lan_close(struct ipmi_intf * intf)
 		close(intf->fd);
 
 	ipmi_req_clear_entries();
-
-	if (intf->session != NULL) {
-		free(intf->session);
-		intf->session = NULL;
-	}
-
+	ipmi_intf_session_cleanup(intf);
 	intf->opened = 0;
 	intf->manufacturer_id = IPMI_OEM_UNKNOWN;
 	intf = NULL;
@@ -2032,44 +2039,14 @@ ipmi_lan_open(struct ipmi_intf * intf)
 
 	intf->session->sol_data.sequence_number = 1;
 	
-	/* open port to BMC */
-	memset(&s->addr, 0, sizeof(struct sockaddr_in));
-	s->addr.sin_family = AF_INET;
-	s->addr.sin_port = htons(s->port);
-
-	rc = inet_pton(AF_INET, (const char *)s->hostname, &s->addr.sin_addr);
-	if (rc <= 0) {
-		struct hostent *host = gethostbyname((const char *)s->hostname);
-		if (host == NULL) {
-			lprintf(LOG_ERR, "Address lookup for %s failed",
-				s->hostname);
-			return -1;
-		}
-		if (host->h_addrtype != AF_INET) {
-			lprintf(LOG_ERR,
-					"Address lookup for %s failed. Got %s, expected IPv4 address.",
-					s->hostname,
-					(host->h_addrtype == AF_INET6) ? "IPv6" : "Unknown");
-			return (-1);
-		}
-		s->addr.sin_family = host->h_addrtype;
-		memcpy(&s->addr.sin_addr, host->h_addr, host->h_length);
-	}
-
-	lprintf(LOG_DEBUG, "IPMI LAN host %s port %d",
-		s->hostname, ntohs(s->addr.sin_port));
-
-	intf->fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (intf->fd < 0) {
-		lperror(LOG_ERR, "Socket failed");
+	if (ipmi_intf_socket_connect (intf) == -1) {
+		lprintf(LOG_ERR, "Could not open socket!");
 		return -1;
 	}
 
-	/* connect to UDP socket so we get async errors */
-	rc = connect(intf->fd, (struct sockaddr *)&s->addr,
-		     sizeof(struct sockaddr_in));
-	if (rc < 0) {
-		lperror(LOG_ERR, "Connect failed");
+	if (intf->fd < 0) {
+		lperror(LOG_ERR, "Connect to %s failed",
+			s->hostname);
 		intf->close(intf);
 		return -1;
 	}
@@ -2085,6 +2062,10 @@ ipmi_lan_open(struct ipmi_intf * intf)
 	}
 
 	intf->manufacturer_id = ipmi_get_oem(intf);
+
+	/* automatically detect interface request and response sizes */
+	hpm2_detect_max_payload_size(intf);
+
 	return intf->fd;
 }
 
@@ -2097,5 +2078,30 @@ ipmi_lan_setup(struct ipmi_intf * intf)
 		return -1;
 	}
 	memset(intf->session, 0, sizeof(struct ipmi_session));
+
+	/* setup default LAN maximum request and response sizes */
+	intf->max_request_data_size = IPMI_LAN_MAX_REQUEST_SIZE;
+	intf->max_response_data_size = IPMI_LAN_MAX_RESPONSE_SIZE;
+
 	return 0;
+}
+
+static void
+ipmi_lan_set_max_rq_data_size(struct ipmi_intf * intf, uint16_t size)
+{
+	if (size + 7 > 0xFF) {
+		size = 0xFF - 7;
+	}
+
+	intf->max_request_data_size = size;
+}
+
+static void
+ipmi_lan_set_max_rp_data_size(struct ipmi_intf * intf, uint16_t size)
+{
+	if (size + 8 > 0xFF) {
+		size = 0xFF - 8;
+	}
+
+	intf->max_response_data_size = size;
 }

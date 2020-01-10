@@ -71,7 +71,7 @@
 #define SOL_PARAMETER_SOL_PAYLOAD_CHANNEL       0x07
 #define SOL_PARAMETER_SOL_PAYLOAD_PORT          0x08
 
-#define MAX_SOL_RETRY           		6
+#define MAX_SOL_RETRY 6
 
 const struct valstr sol_parameter_vals[] = {
 	{ SOL_PARAMETER_SET_IN_PROGRESS,           "Set In Progress (0)" },
@@ -100,47 +100,45 @@ extern int verbose;
  * ipmi_sol_payload_access
  */
 int
-ipmi_sol_payload_access(struct ipmi_intf * intf,
-			uint8_t channel,
-			uint8_t userid,
-			int enable)
+ipmi_sol_payload_access(struct ipmi_intf * intf, uint8_t channel,
+		uint8_t userid, int enable)
 {
 	struct ipmi_rq req;
 	struct ipmi_rs *rsp;
+	int rc = (-1);
 	uint8_t data[6];
 
 	memset(&req, 0, sizeof(req));
-	req.msg.netfn	 = IPMI_NETFN_APP;
-	req.msg.cmd	 = IPMI_SET_USER_PAYLOAD_ACCESS;
-	req.msg.data	 = data;
+	req.msg.netfn = IPMI_NETFN_APP;
+	req.msg.cmd = IPMI_SET_USER_PAYLOAD_ACCESS;
+	req.msg.data = data;
 	req.msg.data_len = 6;
 
 	memset(data, 0, 6);
-
-	data[0] = channel & 0xf;	/* channel */
-	data[1] = userid & 0x3f;	/* user id */
-	if (!enable)
-		data[1] |= 0x40;	/* disable */
-	data[2] = 0x02;			/* payload 1 is SOL */
-
-	rsp = intf->sendrecv(intf, &req);
-
-	if (NULL != rsp) {
-		switch (rsp->ccode) {
-			case 0x00:
-				return 0;
-			default:
-				lprintf(LOG_ERR, "Error %sabling SOL payload for user %d on channel %d: %s",
-					enable ? "en" : "dis", userid, channel,
-					val2str(rsp->ccode, completion_code_vals));
-				break;
-		}
-	} else {
-		lprintf(LOG_ERR, "Error %sabling SOL payload for user %d on channel %d",
-			enable ? "en" : "dis", userid, channel);
+	/* channel */
+	data[0] = channel & 0xf;
+	/* user id */
+	data[1] = userid & 0x3f;
+	if (!enable) {
+		/* disable */
+		data[1] |= 0x40;
 	}
-
-	return -1;
+	/* payload 1 is SOL */
+	data[2] = 0x02;
+	rsp = intf->sendrecv(intf, &req);
+	if (rsp == NULL) {
+		lprintf(LOG_ERR, "Error %sabling SOL payload for user %d on channel %d",
+				enable ? "en" : "dis", userid, channel);
+		rc = (-1);
+	} else if (rsp->ccode != 0) {
+		lprintf(LOG_ERR, "Error %sabling SOL payload for user %d on channel %d: %s",
+				enable ? "en" : "dis", userid, channel,
+				val2str(rsp->ccode, completion_code_vals));
+		rc = (-1);
+	} else {
+		rc = 0;
+	}
+	return rc;
 }
 
 int
@@ -1479,10 +1477,7 @@ static int
 ipmi_sol_keepalive_using_sol(struct ipmi_intf * intf)
 {
 	struct ipmi_v2_payload v2_payload;
-   struct ipmi_rs * rsp = NULL;
 	struct timeval end;
-
-	int ret = 0;
 
 	if (_disable_keepalive)
 		return 0;
@@ -1490,22 +1485,20 @@ ipmi_sol_keepalive_using_sol(struct ipmi_intf * intf)
 	gettimeofday(&end, 0);
 
 	if (end.tv_sec - _start_keepalive.tv_sec > SOL_KEEPALIVE_TIMEOUT) {
-	   memset(&v2_payload, 0, sizeof(v2_payload));
-
-      v2_payload.payload.sol_packet.character_count = 0;
-
-      rsp = intf->send_sol(intf, &v2_payload);
-
+		memset(&v2_payload, 0, sizeof(v2_payload));
+		v2_payload.payload.sol_packet.character_count = 0;
+		if (intf->send_sol(intf, &v2_payload) == NULL)
+			return -1;
+		/* good return, reset start time */
 		gettimeofday(&_start_keepalive, 0);
-   }
-	return ret;
+	}
+	return 0;
 }
 
 static int
 ipmi_sol_keepalive_using_getdeviceid(struct ipmi_intf * intf)
 {
 	struct timeval  end;
-	int ret = 0;
 
 	if (_disable_keepalive)
 		return 0;
@@ -1513,16 +1506,12 @@ ipmi_sol_keepalive_using_getdeviceid(struct ipmi_intf * intf)
 	gettimeofday(&end, 0);
 
 	if (end.tv_sec - _start_keepalive.tv_sec > SOL_KEEPALIVE_TIMEOUT) {
-	   ret = intf->keepalive(intf);
-	   if ( (ret!=0) && (_keepalive_retries < SOL_KEEPALIVE_RETRIES) ) {
-         ret = 0;
-         _keepalive_retries++;
-	   }
-	   else if ((ret==0) && (_keepalive_retries > 0))
-         _keepalive_retries = 0;
+		if (intf->keepalive(intf) != 0)
+         		return -1;
+		/* good return, reset start time */
 		gettimeofday(&_start_keepalive, 0);
-   }
-	return ret;
+   	}
+	return 0;
 }
 
 
@@ -1655,14 +1644,15 @@ ipmi_sol_red_pill(struct ipmi_intf * intf, int instance)
 			else if (FD_ISSET(intf->fd, &read_fds))
 			{
 				struct ipmi_rs * rs =intf->recv_sol(intf);
-				if (! rs)
-				{
-					bShouldExit = bBmcClosedSession = 1;
-				}
-				else
+				if ( rs)
 				{
 					output(rs);
 				}
+				/*
+				 * Should recv_sol come back null, the incoming packet was not ours.
+				 * Just fall through, the keepalive logic will determine if
+				 * the BMC has dropped the session.
+				 */
  			}
 
 
@@ -1832,17 +1822,6 @@ ipmi_sol_activate(struct ipmi_intf * intf, int looptest, int interval,
 		(ap_rsp.payload_udp_port[1] << 8) |
 		ap_rsp.payload_udp_port[0];
 
-
-	#if WORDS_BIGENDIAN
-	intf->session->sol_data.max_inbound_payload_size =
-		BSWAP_16(intf->session->sol_data.max_inbound_payload_size);
-	intf->session->sol_data.max_outbound_payload_size =
-		BSWAP_16(intf->session->sol_data.max_outbound_payload_size);
-	intf->session->sol_data.port =
-		BSWAP_16(intf->session->sol_data.port);
-	#endif
-
-
 	intf->session->timeout = 1;
 
 
@@ -1931,29 +1910,21 @@ print_sol_set_usage(void)
 
 
 
-/*
- * ipmi_sol_main
- */
+/* ipmi_sol_main */
 int
 ipmi_sol_main(struct ipmi_intf * intf, int argc, char ** argv)
 {
 	int retval = 0;
-
-	/*
-	 * Help
-	 */
-	if (!argc || !strncmp(argv[0], "help", 4))
+	if (!argc || !strncmp(argv[0], "help", 4)) {
+		/* Help */
 		print_sol_usage();
-
-	/*
-	 * Info
-	 */
- 	else if (!strncmp(argv[0], "info", 4)) {
+	} else if (!strncmp(argv[0], "info", 4)) {
+		/* Info */
 		uint8_t channel;
-
-		if (argc == 1)
-			channel = 0x0E; /* Ask about the current channel */
-		else if (argc == 2) {
+		if (argc == 1) {
+			/* Ask about the current channel */
+			channel = 0x0E;
+		} else if (argc == 2) {
 			if (is_ipmi_channel_num(argv[1], &channel) != 0) {
 				return (-1);
 			}
@@ -1961,110 +1932,71 @@ ipmi_sol_main(struct ipmi_intf * intf, int argc, char ** argv)
 			print_sol_usage();
 			return -1;
 		}
-
 		retval = ipmi_print_sol_info(intf, channel);
-	}
-
-	/*
-	 * Payload enable or disable
-	 */
-	else if (!strncmp(argv[0], "payload", 7)) {
+	} else if (!strncmp(argv[0], "payload", 7)) {
+		/* Payload enable or disable */
 		uint8_t channel = 0xe;
 		uint8_t userid = 1;
 		int enable = -1;
-
-		if (argc == 1 || argc > 4)
-		{
+		if (argc == 1 || argc > 4) {
 			print_sol_usage();
 			return -1;
 		}
-
-		if (argc == 1 || argc > 4)
-		{
+		if (argc == 1 || argc > 4) {
 			print_sol_usage();
 			return -1;
 		}
-
 		if (argc >= 3) {
 			if (is_ipmi_channel_num(argv[2], &channel) != 0) {
 				return (-1);
 			}
 		}
-		if (argc == 4)
-		{
+		if (argc == 4) {
 			if (is_ipmi_user_id(argv[3], &userid) != 0) {
 				return (-1);
 			}
 		}
-
-		if (!strncmp(argv[1], "enable", 6))
-		{
+		if (!strncmp(argv[1], "enable", 6)) {
 			enable = 1;
-		}
-		else if (!strncmp(argv[1], "disable", 7))
-		{
+		} else if (!strncmp(argv[1], "disable", 7)) {
 			enable = 0;
-		}
-		else if (!strncmp(argv[1], "status", 6))
-		{
+		} else if (!strncmp(argv[1], "status", 6)) {
 			return ipmi_sol_payload_access_status(intf, channel, userid);
-		}
-		else
-		{
+		} else {
 			print_sol_usage();
 			return -1;
 		}
-
 		retval = ipmi_sol_payload_access(intf, channel, userid, enable);
-	}
-
-
-	/*
-	 * Set a parameter value
-	 */
-	else if (!strncmp(argv[0], "set", 3)) {
+	} else if (!strncmp(argv[0], "set", 3)) {
+		/* Set a parameter value */
 		uint8_t channel = 0xe;
 		uint8_t guard = 1;
-
-		if (argc == 3)
-		{
+		if (argc == 3) {
 			channel = 0xe;
-		}
-		else if (argc == 4)
-		{
-			if (!strncmp(argv[3], "noguard", 7))
+		} else if (argc == 4) {
+			if (!strncmp(argv[3], "noguard", 7)) {
 				guard = 0;
-			else {
+			} else {
 				if (is_ipmi_channel_num(argv[3], &channel) != 0) {
 					return (-1);
 				}
 			}
-		}
-		else if (argc == 5)
-		{
+		} else if (argc == 5) {
 			if (is_ipmi_channel_num(argv[3], &channel) != 0) {
 				return (-1);
 			}
-			if (!strncmp(argv[4], "noguard", 7))
+			if (!strncmp(argv[4], "noguard", 7)) {
 				guard = 0;
-		}
-		else
-		{
+			}
+		} else {
 			print_sol_set_usage();
 			return -1;
 		}
-
 		retval = ipmi_sol_set_param(intf, channel, argv[1], argv[2], guard);
-	}
-
-
-	/*
-	 * Activate
-	 */
- 	else if (!strncmp(argv[0], "activate", 8)) {
+	} else if (!strncmp(argv[0], "activate", 8)) {
+		/* Activate */
 		int i;
 		uint8_t instance = 1;
-
 		for (i = 1; i < argc; i++) {
 			if (!strncmp(argv[i], "usesolkeepalive", 15)) {
 				_use_sol_for_keepalive = 1;
@@ -2082,20 +2014,16 @@ ipmi_sol_main(struct ipmi_intf * intf, int argc, char ** argv)
 			}
 		}
 		retval = ipmi_sol_activate(intf, 0, 0, instance);
-	}
-
-
-	/*
-	 * Dectivate
-	 */
-	else if (!strncmp(argv[0], "deactivate", 10)) {
+	} else if (!strncmp(argv[0], "deactivate", 10)) {
+		/* Dectivate */
 		int i;
 		uint8_t instance = 1;
-
 		for (i = 1; i < argc; i++) {
 			if (!strncmp(argv[i], "instance=", 9)) {
 				if (str2uchar(argv[i] + 9, &instance) != 0) {
-					lprintf(LOG_ERR, "Given instance '%s' is invalid.", argv[i] + 9);
+					lprintf(LOG_ERR,
+							"Given instance '%s' is invalid.",
+							argv[i] + 9);
 					print_sol_usage();
 					return -1;
 				}
@@ -2105,66 +2033,58 @@ ipmi_sol_main(struct ipmi_intf * intf, int argc, char ** argv)
 			}
 		}
 		retval = ipmi_sol_deactivate(intf, instance);
-	}
-
-	/*
-	 * SOL loop test: Activate and then Dectivate
-	 */
-	else if (!strncmp(argv[0], "looptest", 8))
-	{
+	} else if (!strncmp(argv[0], "looptest", 8)) {
+		/* SOL loop test: Activate and then Dectivate */
 		int cnt = 200;
 		int interval = 100; /* Unit is: ms */
-		uint8_t instance;
-
-		if (argc > 4)
-		{
+		uint8_t instance = 1;
+		if (argc > 4) {
 			print_sol_usage();
 			return -1;
 		}
-		if (argc != 1) /* at least 2 */
-		{
+		if (argc != 1) {
+			/* at least 2 */
 			if (str2int(argv[1], &cnt) != 0) {
 				lprintf(LOG_ERR, "Given cnt '%s' is invalid.",
 						argv[1]);
 				return (-1);
 			}
-			if(cnt <= 0) cnt = 200;
+			if (cnt <= 0) {
+				cnt = 200;
+			}
 		}
-		if (argc >= 3)
-		{
+		if (argc >= 3) {
 			if (str2int(argv[2], &interval) != 0) {
 				lprintf(LOG_ERR, "Given interval '%s' is invalid.",
 						argv[2]);
 				return (-1);
 			}
-			if(interval < 0) interval = 0;
+			if (interval < 0) {
+				interval = 0;
+			}
 		}
 		if (argc >= 4) {
 			if (str2uchar(argv[3], &instance) != 0) {
-				lprintf(LOG_ERR, "Given instance '%s' is invalid.", argv[3]);
+				lprintf(LOG_ERR, "Given instance '%s' is invalid.",
+						argv[3]);
 				print_sol_usage();
 				return -1;
 			}
 		}
 
-		while (cnt > 0)
-		{
+		while (cnt > 0) {
 			printf("remain loop test counter: %d\n", cnt);
 			retval = ipmi_sol_activate(intf, 1, interval, instance);
-			if (retval)
-			{
-				printf("SOL looptest failed: %d\n", retval);
+			if (retval) {
+				printf("SOL looptest failed: %d\n",
+						retval);
 				break;
 			}
 			cnt -= 1;
 		}
-	}
-
-	else
-	{
+	} else {
 		print_sol_usage();
 		retval = -1;
 	}
-
 	return retval;
 }

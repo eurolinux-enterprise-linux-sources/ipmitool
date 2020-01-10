@@ -1,9 +1,12 @@
-From f48ce96e7fd0d2fe198845f0e2bd76f95d221fb3 Mon Sep 17 00:00:00 2001
-From: Charles Rose <charles_rose@dell.com>
-Date: Thu, 12 Dec 2013 16:10:11 -0500
-Subject: [PATCH] Incorporate upstream comments to #289, add whitespace, other
- cleanup
+From 24522dfdfc97df38da50765c1131df80194b2050 Mon Sep 17 00:00:00 2001
+From: Boris Ranto <branto@redhat.com>
+Date: Fri, 11 Dec 2015 16:27:31 +0100
+Subject: [PATCH 11/11] ipmitool-1.8.13-bmc-snmp.patch
 
+Incorporate upstream comments to #289, add whitespace, other
+cleanup.
+
+Backported by: aledvink
 ---
  contrib/bmc-snmp-proxy | 130 +++++++++++++++++++++++++++++--------------------
  1 file changed, 76 insertions(+), 54 deletions(-)
@@ -355,5 +358,5 @@ index 1704ef3..98479b9 100644
  #############################################################################
  # end of file
 -- 
-1.8.3.1
+2.1.0
 

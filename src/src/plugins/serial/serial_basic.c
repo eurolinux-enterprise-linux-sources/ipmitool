@@ -189,6 +189,10 @@ serial_bm_setup(struct ipmi_intf * intf)
 		return -1;
 	}
 	memset(intf->session, 0, sizeof(struct ipmi_session));
+
+	/* setup default LAN maximum request and response sizes */
+	intf->max_request_data_size = SERIAL_BM_MAX_RQ_SIZE;
+	intf->max_response_data_size = SERIAL_BM_MAX_RS_SIZE;
 	return 0;
 }
 
@@ -266,8 +270,14 @@ serial_bm_open(struct ipmi_intf * intf)
 
 	/* no flow control */
 	ti.c_cflag &= ~CRTSCTS;
-	ti.c_iflag &= ~(IGNBRK | IGNCR | INLCR | ICRNL | IUCLC | INPCK | ISTRIP
+	ti.c_iflag &= ~(IGNBRK | IGNCR | INLCR | ICRNL | INPCK | ISTRIP
 			| IXON | IXOFF | IXANY);
+#ifdef IUCLC
+        /* Only disable uppercase-to-lowercase mapping on input for
+	   platforms supporting the flag. */
+	ti.c_iflag &= ~(IUCLC);
+#endif
+
 
 	ti.c_oflag &= ~(OPOST);
 	ti.c_lflag &= ~(ICANON | ISIG | ECHO | ECHONL | NOFLSH);
@@ -295,12 +305,7 @@ serial_bm_close(struct ipmi_intf * intf)
 		close(intf->fd);
 		intf->fd = -1;
 	}
-
-	if (intf->session) {
-		free(intf->session);
-		intf->session = NULL;
-	}
-
+	ipmi_intf_session_cleanup(intf);
 	intf->opened = 0;
 }
 
@@ -323,7 +328,13 @@ serial_bm_alloc_seq(void)
 static int
 serial_bm_flush(struct ipmi_intf * intf)
 {
-	return ioctl(intf->fd, TCFLSH, TCIOFLUSH);
+#if defined(TCFLSH)
+    return ioctl(intf->fd, TCFLSH, TCIOFLUSH);
+#elif defined(TIOCFLUSH)
+    return ioctl(intf->fd, TIOCFLUSH);
+#else
+#   error "unsupported platform, missing flush support (TCFLSH/TIOCFLUSH)"
+#endif
 }
 
 /*

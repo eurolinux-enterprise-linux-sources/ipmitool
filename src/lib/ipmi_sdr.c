@@ -59,7 +59,7 @@
 
 extern int verbose;
 static int use_built_in;	/* Uses DeviceSDRs instead of SDRR */
-static int sdr_max_read_len = GET_SDR_ENTIRE_RECORD;
+static int sdr_max_read_len = 0;
 static int sdr_extended = 0;
 static long sdriana = 0;
 
@@ -456,10 +456,12 @@ ipmi_sdr_get_sensor_thresholds(struct ipmi_intf *intf, uint8_t sensor,
 {
 	struct ipmi_rq req;
 	struct ipmi_rs *rsp;
-	uint32_t save_addr = 0;
+	uint8_t  bridged_request = 0;
+	uint32_t save_addr;
 	uint32_t save_channel;
 
 	if ( BRIDGE_TO_SENSOR(intf, target, channel) ) {
+		bridged_request = 1;
 		save_addr = intf->target_addr;
 		intf->target_addr = target;
 		save_channel = intf->target_channel;
@@ -474,7 +476,7 @@ ipmi_sdr_get_sensor_thresholds(struct ipmi_intf *intf, uint8_t sensor,
 	req.msg.data_len = sizeof (sensor);
 
 	rsp = intf->sendrecv(intf, &req);
-	if ( save_addr ) {
+	if (bridged_request) {
 		intf->target_addr = save_addr;
 		intf->target_channel = save_channel;
 	}
@@ -498,10 +500,12 @@ ipmi_sdr_get_sensor_hysteresis(struct ipmi_intf *intf, uint8_t sensor,
 	struct ipmi_rq req;
 	uint8_t rqdata[2];
 	struct ipmi_rs *rsp;
-	uint32_t save_addr = 0;
+	uint8_t  bridged_request = 0;
+	uint32_t save_addr;
 	uint32_t save_channel;
 
 	if ( BRIDGE_TO_SENSOR(intf, target, channel) ) {
+		bridged_request = 1;
 		save_addr = intf->target_addr;
 		intf->target_addr = target;
 		save_channel = intf->target_channel;
@@ -519,7 +523,7 @@ ipmi_sdr_get_sensor_hysteresis(struct ipmi_intf *intf, uint8_t sensor,
 	req.msg.data_len = 2;
 
 	rsp = intf->sendrecv(intf, &req);
-	if ( save_addr ) {
+	if (bridged_request) {
 		intf->target_addr = save_addr;
 		intf->target_channel = save_channel;
 	}
@@ -564,10 +568,17 @@ ipmi_sdr_get_sensor_reading_ipmb(struct ipmi_intf *intf, uint8_t sensor,
 {
 	struct ipmi_rq req;
 	struct ipmi_rs *rsp;
-	uint32_t save_addr = 0;
+	uint8_t  bridged_request = 0;
+	uint32_t save_addr;
 	uint32_t save_channel;
 
 	if ( BRIDGE_TO_SENSOR(intf, target, channel) ) {
+		lprintf(LOG_DEBUG,
+			"Bridge to Sensor "
+			"Intf my/%#x tgt/%#x:%#x Sdr tgt/%#x:%#x\n",
+			intf->my_addr, intf->target_addr, intf->target_channel,
+			target, channel);
+		bridged_request = 1;
 		save_addr = intf->target_addr;
 		intf->target_addr = target;
 		save_channel = intf->target_channel;
@@ -581,7 +592,7 @@ ipmi_sdr_get_sensor_reading_ipmb(struct ipmi_intf *intf, uint8_t sensor,
 	req.msg.data_len = 1;
 
 	rsp = intf->sendrecv(intf, &req);
-	if ( save_addr ) {
+	if (bridged_request) {
 		intf->target_addr    = save_addr;
 		intf->target_channel = save_channel;
 	}
@@ -604,10 +615,12 @@ ipmi_sdr_get_sensor_event_status(struct ipmi_intf *intf, uint8_t sensor,
 {
 	struct ipmi_rq req;
 	struct ipmi_rs *rsp;
-	uint32_t save_addr = 0;
+	uint8_t  bridged_request = 0;
+	uint32_t save_addr;
 	uint32_t save_channel;
 
 	if ( BRIDGE_TO_SENSOR(intf, target, channel) ) {
+		bridged_request = 1;
 		save_addr = intf->target_addr;
 		intf->target_addr = target;
 		save_channel = intf->target_channel;
@@ -621,7 +634,7 @@ ipmi_sdr_get_sensor_event_status(struct ipmi_intf *intf, uint8_t sensor,
 	req.msg.data_len = 1;
 
 	rsp = intf->sendrecv(intf, &req);
-	if ( save_addr ) {
+	if (bridged_request) {
 		intf->target_addr = save_addr;
 		intf->target_channel = save_channel;
 	}
@@ -644,10 +657,12 @@ ipmi_sdr_get_sensor_event_enable(struct ipmi_intf *intf, uint8_t sensor,
 {
 	struct ipmi_rq req;
 	struct ipmi_rs *rsp;
-	uint32_t save_addr = 0;
+	uint8_t  bridged_request = 0;
+	uint32_t save_addr;
 	uint32_t save_channel;
 
 	if ( BRIDGE_TO_SENSOR(intf, target, channel) ) {
+		bridged_request = 1;
 		save_addr = intf->target_addr;
 		intf->target_addr = target;
 		save_channel = intf->target_channel;
@@ -662,7 +677,7 @@ ipmi_sdr_get_sensor_event_enable(struct ipmi_intf *intf, uint8_t sensor,
 	req.msg.data_len = 1;
 
 	rsp = intf->sendrecv(intf, &req);
-	if ( save_addr ) {
+	if (bridged_request) {
 		intf->target_addr = save_addr;
 		intf->target_channel = save_channel;
 	}
@@ -2407,6 +2422,7 @@ ipmi_sdr_print_sensor_oem_intel(struct ipmi_intf *intf,
 				    ("Power Redundancy | PS@%02xh            | nr\n",
 				     oem->data[8]);
 			}
+			break;
 		case 9:	/* SR2300, non-redundant, PSx present */
 			if (verbose) {
 				printf("Power Redundancy       : Yes\n");
@@ -3007,6 +3023,17 @@ ipmi_sdr_get_record(struct ipmi_intf * intf, struct sdr_get_rs * header,
 	}
 	req.msg.data = (uint8_t *) & sdr_rq;
 	req.msg.data_len = sizeof (sdr_rq);
+
+	/* check if max length is null */
+	if ( sdr_max_read_len == 0 ) {
+		/* get maximum response size */
+		sdr_max_read_len = ipmi_intf_get_max_response_data_size(intf) - 2;
+
+		/* cap the number of bytes to read */
+		if (sdr_max_read_len > 0xFE) {
+			sdr_max_read_len = 0xFE;
+		}
+	}
 
 	/* read SDR record with partial reads
 	 * because a full read usually exceeds the maximum
