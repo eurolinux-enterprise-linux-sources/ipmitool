@@ -3,7 +3,7 @@
 Name:         ipmitool
 Summary:      Utility for IPMI control
 Version:      1.8.18
-Release:      5%{?dist}
+Release:      7%{?dist}
 License:      BSD
 Group:        System Environment/Base
 URL:          http://ipmitool.sourceforge.net/
@@ -34,6 +34,9 @@ Patch7:  0007-ipmitool-1.8.11-remove-umask0.patch.patch
 Patch9:  0009-ipmitool-1.8.11-bz1126333-slowswid.patch.patch
 Patch10: 0010-ipmitool-1.8.11-bz878614-overname.patch.patch
 Patch15: 0015-ID-390-Support-for-new-Communication-Interface-USB-M.patch
+Patch16: 0016-ipmitool-1.8.18-verbose.patch
+Patch17: 0017-ipmitool-1.8.18-check-input-values.patch
+
 
 %description
 This package contains a utility for interfacing with devices that support
@@ -90,6 +93,8 @@ for the host OS to use.
 %patch9 -p1
 %patch10 -p1
 %patch15 -p1
+%patch16 -p1
+%patch17 -p1
 
 for f in AUTHORS ChangeLog; do
     iconv -f iso-8859-1 -t utf8 < ${f} > ${f}.utf8
@@ -181,6 +186,13 @@ install -Dm 755 contrib/bmc-snmp-proxy         %{buildroot}%{_libexecdir}/bmc-sn
 %{_libexecdir}/bmc-snmp-proxy
 
 %changelog
+* Tue Feb 06 2018 Josef Ridky <jridky@redhat.com> - 0:1.8.18-7
+- Remove debug prints shown without -v option (#1483163)
+
+* Tue Oct 03 2017 Josef Ridky <jridky@redhat.com> - 0:1.8.18-6
+- Hide unrequested verbose output (#1483163)
+- Fix doc for check input values (#1495098)
+
 * Mon Apr 10 2017 Josef Ridky <jridky@redhat.com> - 0:1.8.18-5
 - Remove RPMDiff fix file (#1439269) related to #1398658
 
