@@ -571,7 +571,7 @@ KfwumGetDeviceInfo(struct ipmi_intf *intf, unsigned char output,
 				pGetDevId->fw_rev1, pGetDevId->fw_rev2 >> 4,
 				pGetDevId->fw_rev2 & 0x0f);
 		if (((pBoardInfo->iana == IPMI_OEM_KONTRON)
-					&& (pBoardInfo->boardId = KFWUM_BOARD_KONTRON_5002))) {
+					&& (pBoardInfo->boardId == KFWUM_BOARD_KONTRON_5002))) {
 			printf(" SDR %u", pGetDevId->aux_fw_rev[0]);
 		}
 		printf("\n");
@@ -837,11 +837,8 @@ KfwumFinishFirmwareImage(struct ipmi_intf *intf, tKFWUM_InFirmwareInfo firmInfo)
 	do {
 		rsp = intf->sendrecv(intf, &req);
 	} while (rsp == NULL || rsp->ccode == 0xc0);
-	if (!rsp) {
-		lprintf(LOG_ERR,
-				"Error in FWUM Firmware Finish Firmware Image Download Command.");
-		return (-1);
-	} else if (rsp->ccode != 0) {
+
+	if (rsp->ccode != 0) {
 		lprintf(LOG_ERR,
 				"FWUM Firmware Finish Firmware Image Download returned %x",
 				rsp->ccode);
@@ -861,7 +858,6 @@ KfwumUploadFirmware(struct ipmi_intf *intf, unsigned char *pBuffer,
 	unsigned long lastAddress = 0;
 	unsigned char sequenceNumber = 0;
 	unsigned char retry = FWUM_MAX_UPLOAD_RETRY;
-	unsigned char isLengthValid = 1;
 	do {
 		writeSize = save_fw_nfo.bufferSize - save_fw_nfo.overheadSize;
 		/* Reach the end */

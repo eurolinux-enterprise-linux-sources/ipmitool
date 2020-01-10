@@ -89,6 +89,25 @@ struct ipm_devid_rsp {
 
 #define IPM_DEV_ADTL_SUPPORT_BITS      (8)
 
+/* Structure follow the IPMI V.2 Rev 1.0
+ * See Table 20-10 */
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(1)
+#endif
+struct ipmi_guid_t {
+	uint32_t  time_low;	/* timestamp low field */
+	uint16_t  time_mid;	/* timestamp middle field */
+	uint16_t  time_hi_and_version; /* timestamp high field and version number */
+	uint8_t   clock_seq_hi_variant;/* clock sequence high field and variant */
+	uint8_t   clock_seq_low; /* clock sequence low field */
+	uint8_t   node[6];	/* node */
+} ATTRIBUTE_PACKING;
+#ifdef HAVE_PRAGMA_PACK
+#pragma pack(0)
+#endif
+
+int _ipmi_mc_get_guid(struct ipmi_intf *, struct ipmi_guid_t *);
+
 #ifdef HAVE_PRAGMA_PACK
 #pragma pack(1)
 #endif
@@ -157,11 +176,16 @@ struct ipm_get_watchdog_rsp {
 #define IPMI_SYSINFO_SET0_SIZE             14
 #define IPMI_SYSINFO_SETN_SIZE             16
 
+/* System Information "Parameter selector" values: */
+#define IPMI_SYSINFO_SET_STATE		0x00
+#define IPMI_SYSINFO_SYSTEM_FW_VERSION	0x01
 #define IPMI_SYSINFO_HOSTNAME		0x02
 #define IPMI_SYSINFO_PRIMARY_OS_NAME	0x03
 #define IPMI_SYSINFO_OS_NAME		0x04
 #define IPMI_SYSINFO_DELL_OS_VERSION	0xe4
 #define IPMI_SYSINFO_DELL_URL		0xde
+#define IPMI_SYSINFO_DELL_IPV6_COUNT    0xe6
+#define IPMI_SYSINFO_DELL_IPV6_DESTADDR 0xf0
 
 int ipmi_mc_getsysinfo(struct ipmi_intf * intf, int param, int block, int set, 
 		    int len, void *buffer);

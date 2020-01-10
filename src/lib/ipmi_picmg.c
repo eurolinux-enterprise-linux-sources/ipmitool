@@ -417,27 +417,6 @@ is_led_color(const char *argv_ptr, uint8_t *led_color_ptr)
 	lprintf(LOG_ERR, "LED Color must be from ranges: <1..6>, <0xE..0xF>");
 	return (-1);
 }
-/* is_led_duration - wrapper to convert user input into integer.
- * LED duration range is <1..127>
- *
- * @argv_ptr: source string to convert from; usually argv
- * @enable_ptr: pointer where to store result
- * returns: zero on success, other values mean error
- */
-int
-is_led_duration(const char *argv_ptr, uint8_t *led_duration_ptr)
-{
-	if (!argv_ptr || !led_duration_ptr) {
-		lprintf(LOG_ERR, "is_led_duration(): invalid argument(s).");
-		return (-1);
-	}
-	if (str2uchar(argv_ptr, led_duration_ptr) == 0
-			&& *led_duration_ptr > 0 && *led_duration_ptr <= 127) {
-		return 0;
-	}
-	lprintf(LOG_ERR, "Given LED Duration '%s' is invalid", argv_ptr);
-	return (-1);
-}
 /* is_led_function - wrapper to convert user input into integer.
  * LED functions, however, might differ by OEM:
  * - 0x00 - off override
@@ -772,21 +751,19 @@ ipmi_picmg_fru_activation_policy_set(struct ipmi_intf * intf, int argc, char ** 
 	if (is_fru_id(argv[0], &msg_data[1]) != 0) {
 		return (-1);
 	}
-	if (str2uchar(argv[1], &msg_data[2]) != 0 || msg_data[2] > 1) {
+	if (str2uchar(argv[1], &msg_data[2]) != 0 || msg_data[2] > 3) {
 		/* FRU Lock Mask */
 		lprintf(LOG_ERR, "Given FRU Lock Mask '%s' is invalid.",
 				argv[1]);
 		return (-1);
 	}
-	if (str2uchar(argv[2], &msg_data[3]) != 0 || msg_data[3] > 1) {
+	if (str2uchar(argv[2], &msg_data[3]) != 0 || msg_data[3] > 3) {
 		/* FRU Act Policy */
 		lprintf(LOG_ERR,
 				"Given FRU Activation Policy '%s' is invalid.",
 				argv[2]);
 		return (-1);
 	}
-	msg_data[2]&= 0x03;
-	msg_data[3]&= 0x03;
 
 	rsp = intf->sendrecv(intf, &req);
 
@@ -1303,49 +1280,53 @@ ipmi_picmg_get_led_state(struct ipmi_intf * intf, int argc, char ** argv)
 	}
 
 	printf("LED states:						  %x	", rsp->data[1] );
-	if (rsp->data[1] == 0x1)
-		printf("[LOCAL CONTROL]\n");
-	else if (rsp->data[1] == 0x2)
-		printf("[OVERRIDE]\n");
-	else if (rsp->data[1] == 0x4)
-		printf("[LAMPTEST]\n");
-	else
-		printf("\n");
+
+	if (!(rsp->data[1] & 0x1)) {
+		printf("[NO LOCAL CONTROL]\n");
+		return 0;
+	}
+
+	printf("[LOCAL CONTROL");
+
+	if (rsp->data[1] & 0x2) {
+		printf("|OVERRIDE");
+	}
+
+	if (rsp->data[1] & 0x4) {
+		printf("|LAMPTEST");
+	}
+
+	printf("]\n");
 
 	printf("  Local Control function:     %x  ", rsp->data[2] );
-	if (rsp->data[2] == 0x0)
+	if (rsp->data[2] == 0x0) {
 		printf("[OFF]\n");
-	else if (rsp->data[2] == 0xff)
+	} else if (rsp->data[2] == 0xff) {
 		printf("[ON]\n");
-	else
+	} else {
 		printf("[BLINKING]\n");
+	}
 
 	printf("  Local Control On-Duration:  %x\n", rsp->data[3] );
 	printf("  Local Control Color:        %x  [%s]\n", rsp->data[4], led_color_str[ rsp->data[4] ]);
 
 	/* override state or lamp test */
-	if (rsp->data[1] == 0x02) {
+	if (rsp->data[1] & 0x02) {
 		printf("  Override function:     %x  ", rsp->data[5] );
-		if (rsp->data[2] == 0x0)
+		if (rsp->data[2] == 0x0) {
 			printf("[OFF]\n");
-		else if (rsp->data[2] == 0xff)
+		} else if (rsp->data[2] == 0xff) {
 			printf("[ON]\n");
-		else
+		} else {
 			printf("[BLINKING]\n");
+		}
 
 		printf("  Override On-Duration:  %x\n", rsp->data[6] );
 		printf("  Override Color:        %x  [%s]\n", rsp->data[7], led_color_str[ rsp->data[7] ]);
 
-	}else if (rsp->data[1] == 0x06) {
-		printf("  Override function:     %x  ", rsp->data[5] );
-		if (rsp->data[2] == 0x0)
-			printf("[OFF]\n");
-		else if (rsp->data[2] == 0xff)
-			printf("[ON]\n");
-		else
-			printf("[BLINKING]\n");
-		printf("  Override On-Duration:  %x\n", rsp->data[6] );
-		printf("  Override Color:        %x  [%s]\n", rsp->data[7], led_color_str[ rsp->data[7] ]);
+	}
+
+	if (rsp->data[1] & 0x04) {
 		printf("  Lamp test duration:    %x\n", rsp->data[8] );
 	}
 
@@ -1363,17 +1344,53 @@ ipmi_picmg_set_led_state(struct ipmi_intf * intf, int argc, char ** argv)
 	memset(&req, 0, sizeof(req));
 
 	req.msg.netfn = IPMI_NETFN_PICMG;
-	req.msg.cmd	  = PICMG_SET_FRU_LED_STATE_CMD;
-	req.msg.data  = msg_data;
+	req.msg.cmd = PICMG_SET_FRU_LED_STATE_CMD;
+	req.msg.data = msg_data;
 	req.msg.data_len = 6;
 
 	msg_data[0] = 0x00;									/* PICMG identifier */
 	if (is_fru_id(argv[0], &msg_data[1]) != 0
 			|| is_led_id(argv[1], &msg_data[2]) != 0
 			|| is_led_function(argv[2], &msg_data[3]) != 0
-			|| is_led_duration(argv[3], &msg_data[4]) != 0
 			|| is_led_color(argv[4], &msg_data[5]) != 0) {
 		return (-1);
+	}
+
+	/* Validating the LED duration is not as simple as the other arguments, as
+	 * the range of valid durations depends on the LED function.  From the spec:
+	 *
+	 * ``On-duration: LED on-time in tens of milliseconds if (1 <= Byte 4 <= FAh)
+	 * Lamp Test time in hundreds of milliseconds if (Byte 4 = FBh). Lamp Test
+	 * time value must be less than 128. Other values when Byte 4 = FBh are
+	 * reserved. Otherwise, this field is ignored and shall be set to 0h.''
+	 *
+	 * If we're doing a lamp test, then the allowed values are 0 -> 127.
+	 * Otherwise, the allowed values are 0 -> 255.  However, if the function is
+	 * not a lamp test (0xFB) and outside the range 0x01 -> 0xFA then the value
+	 * should be set to 0.
+	 *
+	 * Start by checking we have a parameter.
+	 */
+	if (!argv[3]) {
+		lprintf(LOG_ERR, "LED Duration: invalid argument(s).");
+		return (-1);
+	}
+	/* Next check we have a number. */
+	if (str2uchar(argv[3], &msg_data[4]) != 0) {
+		lprintf(LOG_ERR, "Given LED Duration '%s' is invalid", argv[3]);
+		return (-1);
+	}
+	/* If we have a lamp test, ensure it's not too long a duration. */
+	if (msg_data[3] == 0xFB && msg_data[4] > 127) {
+		lprintf(LOG_ERR, "Given LED Duration '%s' is invalid", argv[3]);
+		return (-1);
+	}
+	/* If we're outside the range that allows durations, set the duration to 0.
+	 * Warn the user that we're doing this.
+	 */
+	if (msg_data[4] != 0 && (msg_data[3] == 0 || msg_data[3] > 0xFB)) {
+		lprintf(LOG_WARN, "Setting LED Duration '%s' to '0'", argv[3]);
+		msg_data[4] = 0;
 	}
 
 	rsp = intf->sendrecv(intf, &req);
@@ -1745,18 +1762,8 @@ ipmi_picmg_clk_set(struct ipmi_intf * intf, int argc, char ** argv)
       }
    }
 
-#if 1
-printf("## ID:      %d\n", msg_data[1]);
-printf("## index:   %d\n", msg_data[2]);
-printf("## setting: 0x%02x\n", msg_data[3]);
-printf("## family:  %d\n", msg_data[4]);
-printf("## acc:     %d\n", msg_data[5]);
-printf("## freq:    %ld\n", freq );
-printf("## res:     %d\n", msg_data[10]);
-#endif
 
 	rsp = intf->sendrecv(intf, &req);
-
 	if (!rsp) {
 		lprintf(LOG_ERR, "No valid response received.");
 		return -1;
@@ -2137,8 +2144,8 @@ ipmi_picmg_main (struct ipmi_intf * intf, int argc, char ** argv)
 					lprintf(LOG_NOTICE,
 							"               252:     LED restore to local control");
 					lprintf(LOG_NOTICE, "               255:     LED ON override");
-					lprintf(LOG_NOTICE,
-							"   <duration>  1 - 127: LED Lamp Test / on duration");
+					lprintf(LOG_NOTICE, "   <duration>  0 - 127: LED Lamp Test duration");
+					lprintf(LOG_NOTICE, "               0 - 255: LED Lamp ON duration");
 					lprintf(LOG_NOTICE, "   <color>     0:   reserved");
 					lprintf(LOG_NOTICE, "               1:   BLUE");
 					lprintf(LOG_NOTICE, "               2:   RED");
@@ -2294,7 +2301,7 @@ uint8_t
 ipmi_picmg_ipmb_address(struct ipmi_intf *intf) {
 	struct ipmi_rq req;
 	struct ipmi_rs *rsp;
-	char msg_data;
+	uint8_t msg_data;
 
 	if (!intf->picmg_avail) {
 		return 0;
@@ -2329,43 +2336,47 @@ picmg_discover(struct ipmi_intf *intf) {
 	 *  PICMG Extension Version 2.0 (PICMG 3.0 Revision 1.0 ATCA) to
 	 *  PICMG Extension Version 2.3 (PICMG 3.0 Revision 3.0 ATCA)
 	 *  PICMG Extension Version 4.1 (PICMG 3.0 Revision 3.0 AMC)
+	 *  PICMG Extension Version 5.0 (MTCA.0 R1.0)
 	 */
 
 	/* First, check if PICMG extension is available and supported */
 	struct ipmi_rq req;
 	struct ipmi_rs *rsp;
-	char msg_data;
+	uint8_t msg_data;
+	uint8_t picmg_avail = 0;
 
-	if (intf->picmg_avail == 0) {
-		memset(&req, 0, sizeof(req));
-		req.msg.netfn = IPMI_NETFN_PICMG;
-		req.msg.cmd = PICMG_GET_PICMG_PROPERTIES_CMD;
-		msg_data    = 0x00;
-		req.msg.data = &msg_data;
-		req.msg.data_len = 1;
-		msg_data = 0;
+	memset(&req, 0, sizeof(req));
+	req.msg.netfn = IPMI_NETFN_PICMG;
+	req.msg.cmd = PICMG_GET_PICMG_PROPERTIES_CMD;
+	msg_data    = 0x00;
+	req.msg.data = &msg_data;
+	req.msg.data_len = 1;
+	msg_data = 0;
 
-		lprintf(LOG_DEBUG, "Running Get PICMG Properties my_addr %#x, transit %#x, target %#x",
-			intf->my_addr, intf->transit_addr, intf->target_addr);
-		rsp = intf->sendrecv(intf, &req);
-		if (rsp && !rsp->ccode) {
-			if ( (rsp->data[0] == 0) &&
-					((rsp->data[1] & 0x0F) == PICMG_ATCA_MAJOR_VERSION
-					|| (rsp->data[1] & 0x0F) == PICMG_AMC_MAJOR_VERSION) )	{
-				intf->picmg_avail = 1;
-				lprintf(LOG_DEBUG, "Discovered PICMG Extension %d.%d",
-						(rsp->data[1] & 0x0f), (rsp->data[1] >> 4));
-			}
-		} else {
-			if (rsp == NULL) {
-				lprintf(LOG_DEBUG,"No Response from Get PICMG Properties");
-			} else {
-				lprintf(LOG_DEBUG,"Error Response %#x from Get PICMG Properities", rsp->ccode);
-			}
-		}
+	lprintf(LOG_INFO, "Running Get PICMG Properties my_addr %#x, transit %#x, target %#x",
+		intf->my_addr, intf->transit_addr, intf->target_addr);
+	rsp = intf->sendrecv(intf, &req);
+	if (rsp == NULL) {
+	    lprintf(LOG_INFO,"No response from Get PICMG Properties");
+	} else if (rsp->ccode != 0) {
+	    lprintf(LOG_INFO,"Error response %#x from Get PICMG Properities",
+		    rsp->ccode);
+	} else if (rsp->data_len < 4) {
+	    lprintf(LOG_INFO,"Invalid Get PICMG Properties response length %d",
+		    rsp->data_len);
+	} else if (rsp->data[0] != 0) {
+	    lprintf(LOG_INFO,"Invalid Get PICMG Properties group extension %#x",
+		    rsp->data[0]);
+	} else if ((rsp->data[1] & 0x0F) != PICMG_EXTENSION_ATCA_MAJOR_VERSION
+		&& (rsp->data[1] & 0x0F) != PICMG_EXTENSION_AMC0_MAJOR_VERSION
+		&& (rsp->data[1] & 0x0F) != PICMG_EXTENSION_UTCA_MAJOR_VERSION) {
+	    lprintf(LOG_INFO,"Unknown PICMG Extension Version %d.%d",
+		    (rsp->data[1] & 0x0F), (rsp->data[1] >> 4));
+	} else {
+	    picmg_avail = 1;
+	    lprintf(LOG_INFO, "Discovered PICMG Extension Version %d.%d",
+		    (rsp->data[1] & 0x0f), (rsp->data[1] >> 4));
 	}
-	if (intf->picmg_avail == 0) {
-		lprintf(LOG_DEBUG, "No PICMG Extenstion discovered");
-	}
-	return intf->picmg_avail;
+
+	return picmg_avail;
 }

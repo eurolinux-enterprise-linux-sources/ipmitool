@@ -29,6 +29,8 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _SVID_SOURCE || _BSD_SOURCE || _POSIX_C_SOURCE >= 1 || \
+	_XOPEN_SOURCE || _POSIX_SOURCE
 
 #include <stdlib.h>
 #include <string.h>
@@ -110,12 +112,6 @@ ipmi_chassis_power_control(struct ipmi_intf * intf, uint8_t ctl)
 
 	printf("Chassis Power Control: %s\n",
 			val2str(ctl, ipmi_chassis_power_control_vals));
-
-#if 0	/* this can cause sessions to hang around after power commands */
-	/* sessions often get lost when changing chassis power */
-	intf->abort = 1;
-#endif
-
 	return 0;
 }
 
@@ -1385,7 +1381,7 @@ ipmi_chassis_main(struct ipmi_intf * intf, int argc, char ** argv)
 		}
 	}
 	else {
-		lprintf(LOG_ERR, "Invalid Chassis command: %s", argv[0]);
+		lprintf(LOG_ERR, "Invalid chassis command: %s", argv[0]);
 		return -1;
 	}
 

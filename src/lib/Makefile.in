@@ -121,6 +121,7 @@ CONFIG_HEADER = $(top_builddir)/config.h
 CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 LTLIBRARIES = $(noinst_LTLIBRARIES)
+am__dirstamp = $(am__leading_dot)dirstamp
 am_libipmitool_la_OBJECTS = helper.lo ipmi_sdr.lo ipmi_sel.lo \
 	ipmi_sol.lo ipmi_pef.lo ipmi_lanp.lo ipmi_fru.lo \
 	ipmi_chassis.lo ipmi_mc.lo log.lo dimm_spd.lo ipmi_sensor.lo \
@@ -130,7 +131,8 @@ am_libipmitool_la_OBJECTS = helper.lo ipmi_sdr.lo ipmi_sel.lo \
 	ipmi_tsol.lo ipmi_firewall.lo ipmi_kontronoem.lo \
 	ipmi_hpmfwupg.lo ipmi_sdradd.lo ipmi_ekanalyzer.lo \
 	ipmi_gendev.lo ipmi_ime.lo ipmi_delloem.lo ipmi_dcmi.lo \
-	hpm2.lo md5.lo
+	hpm2.lo ipmi_vita.lo ipmi_lanp6.lo ipmi_cfgp.lo \
+	../src/plugins/lan/md5.lo
 libipmitool_la_OBJECTS = $(am_libipmitool_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
@@ -253,6 +255,8 @@ INTF_OPEN = @INTF_OPEN@
 INTF_OPEN_LIB = @INTF_OPEN_LIB@
 INTF_SERIAL = @INTF_SERIAL@
 INTF_SERIAL_LIB = @INTF_SERIAL_LIB@
+INTF_USB = @INTF_USB@
+INTF_USB_LIB = @INTF_USB_LIB@
 IPMITOOL_INTF_LIB = @IPMITOOL_INTF_LIB@
 LD = @LD@
 LDFLAGS = @LDFLAGS@
@@ -347,7 +351,8 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-INCLUDES = -I$(top_srcdir)/include
+AUTOMAKE_OPTIONS = subdir-objects
+AM_CPPFLAGS = -I$(top_srcdir)/include
 MAINTAINERCLEANFILES = Makefile.in
 noinst_LTLIBRARIES = libipmitool.la
 libipmitool_la_SOURCES = helper.c ipmi_sdr.c ipmi_sel.c ipmi_sol.c ipmi_pef.c \
@@ -357,7 +362,8 @@ libipmitool_la_SOURCES = helper.c ipmi_sdr.c ipmi_sel.c ipmi_sol.c ipmi_pef.c \
 				  ipmi_oem.c ipmi_isol.c ipmi_sunoem.c ipmi_fwum.c ipmi_picmg.c    \
 				  ipmi_main.c ipmi_tsol.c ipmi_firewall.c ipmi_kontronoem.c        \
 				  ipmi_hpmfwupg.c ipmi_sdradd.c ipmi_ekanalyzer.c ipmi_gendev.c    \
-				  ipmi_ime.c ipmi_delloem.c ipmi_dcmi.c hpm2.c \
+				  ipmi_ime.c ipmi_delloem.c ipmi_dcmi.c hpm2.c ipmi_vita.c \
+				  ipmi_lanp6.c ipmi_cfgp.c \
 				  ../src/plugins/lan/md5.c ../src/plugins/lan/md5.h
 
 libipmitool_la_LDFLAGS = -export-dynamic
@@ -408,19 +414,31 @@ clean-noinstLTLIBRARIES:
 	  echo rm -f $${locs}; \
 	  rm -f $${locs}; \
 	}
+../src/plugins/lan/$(am__dirstamp):
+	@$(MKDIR_P) ../src/plugins/lan
+	@: > ../src/plugins/lan/$(am__dirstamp)
+../src/plugins/lan/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) ../src/plugins/lan/$(DEPDIR)
+	@: > ../src/plugins/lan/$(DEPDIR)/$(am__dirstamp)
+../src/plugins/lan/md5.lo: ../src/plugins/lan/$(am__dirstamp) \
+	../src/plugins/lan/$(DEPDIR)/$(am__dirstamp)
 
 libipmitool.la: $(libipmitool_la_OBJECTS) $(libipmitool_la_DEPENDENCIES) $(EXTRA_libipmitool_la_DEPENDENCIES) 
 	$(AM_V_CCLD)$(libipmitool_la_LINK)  $(libipmitool_la_OBJECTS) $(libipmitool_la_LIBADD) $(LIBS)
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
+	-rm -f ../src/plugins/lan/*.$(OBJEXT)
+	-rm -f ../src/plugins/lan/*.lo
 
 distclean-compile:
 	-rm -f *.tab.c
 
+@AMDEP_TRUE@@am__include@ @am__quote@../src/plugins/lan/$(DEPDIR)/md5.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dimm_spd.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/helper.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hpm2.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_cfgp.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_channel.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_chassis.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_dcmi.Plo@am__quote@
@@ -436,6 +454,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_isol.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_kontronoem.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_lanp.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_lanp6.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_main.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_mc.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_oem.Plo@am__quote@
@@ -452,42 +471,39 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_sunoem.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_tsol.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_user.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ipmi_vita.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/log.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/md5.Plo@am__quote@
 
 .c.o:
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Po
+@am__fastdepCC_TRUE@	$(AM_V_CC)depbase=`echo $@ | sed 's|[^/]*$$|$(DEPDIR)/&|;s|\.o$$||'`;\
+@am__fastdepCC_TRUE@	$(COMPILE) -MT $@ -MD -MP -MF $$depbase.Tpo -c -o $@ $< &&\
+@am__fastdepCC_TRUE@	$(am__mv) $$depbase.Tpo $$depbase.Po
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$<' object='$@' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(COMPILE) -c -o $@ $<
 
 .c.obj:
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ `$(CYGPATH_W) '$<'`
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Po
+@am__fastdepCC_TRUE@	$(AM_V_CC)depbase=`echo $@ | sed 's|[^/]*$$|$(DEPDIR)/&|;s|\.obj$$||'`;\
+@am__fastdepCC_TRUE@	$(COMPILE) -MT $@ -MD -MP -MF $$depbase.Tpo -c -o $@ `$(CYGPATH_W) '$<'` &&\
+@am__fastdepCC_TRUE@	$(am__mv) $$depbase.Tpo $$depbase.Po
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$<' object='$@' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(COMPILE) -c -o $@ `$(CYGPATH_W) '$<'`
 
 .c.lo:
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(LTCOMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Plo
+@am__fastdepCC_TRUE@	$(AM_V_CC)depbase=`echo $@ | sed 's|[^/]*$$|$(DEPDIR)/&|;s|\.lo$$||'`;\
+@am__fastdepCC_TRUE@	$(LTCOMPILE) -MT $@ -MD -MP -MF $$depbase.Tpo -c -o $@ $< &&\
+@am__fastdepCC_TRUE@	$(am__mv) $$depbase.Tpo $$depbase.Plo
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$<' object='$@' libtool=yes @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LTCOMPILE) -c -o $@ $<
-
-md5.lo: ../src/plugins/lan/md5.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT md5.lo -MD -MP -MF $(DEPDIR)/md5.Tpo -c -o md5.lo `test -f '../src/plugins/lan/md5.c' || echo '$(srcdir)/'`../src/plugins/lan/md5.c
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/md5.Tpo $(DEPDIR)/md5.Plo
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='../src/plugins/lan/md5.c' object='md5.lo' libtool=yes @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o md5.lo `test -f '../src/plugins/lan/md5.c' || echo '$(srcdir)/'`../src/plugins/lan/md5.c
 
 mostlyclean-libtool:
 	-rm -f *.lo
 
 clean-libtool:
 	-rm -rf .libs _libs
+	-rm -rf ../src/plugins/lan/.libs ../src/plugins/lan/_libs
 
 ID: $(am__tagged_files)
 	$(am__define_uniq_tagged_files); mkid -fID $$unique
@@ -601,6 +617,8 @@ clean-generic:
 distclean-generic:
 	-test -z "$(CONFIG_CLEAN_FILES)" || rm -f $(CONFIG_CLEAN_FILES)
 	-test . = "$(srcdir)" || test -z "$(CONFIG_CLEAN_VPATH_FILES)" || rm -f $(CONFIG_CLEAN_VPATH_FILES)
+	-rm -f ../src/plugins/lan/$(DEPDIR)/$(am__dirstamp)
+	-rm -f ../src/plugins/lan/$(am__dirstamp)
 
 maintainer-clean-generic:
 	@echo "This command is intended for maintainers to use"
@@ -612,7 +630,7 @@ clean-am: clean-generic clean-libtool clean-noinstLTLIBRARIES \
 	mostlyclean-am
 
 distclean: distclean-am
-	-rm -rf ./$(DEPDIR)
+	-rm -rf ../src/plugins/lan/$(DEPDIR) ./$(DEPDIR)
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-tags
@@ -658,7 +676,7 @@ install-ps-am:
 installcheck-am:
 
 maintainer-clean: maintainer-clean-am
-	-rm -rf ./$(DEPDIR)
+	-rm -rf ../src/plugins/lan/$(DEPDIR) ./$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 

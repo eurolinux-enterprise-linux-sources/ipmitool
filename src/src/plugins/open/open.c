@@ -29,6 +29,7 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _POSIX_C_SOURCE 1
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -38,10 +39,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/select.h>
 #include <sys/stat.h>
 
 #include <ipmitool/ipmi.h>
 #include <ipmitool/ipmi_intf.h>
+#include <ipmitool/ipmi_sel.h>
 #include <ipmitool/helper.h>
 #include <ipmitool/log.h>
 
@@ -80,6 +83,9 @@
  * for completion code and 35 bytes of data.
  */
 #define IPMI_OPENIPMI_MAX_RS_DATA_SIZE 35
+
+/* Timeout for reading data from BMC in seconds */
+#define IPMI_OPENIPMI_READ_TIMEOUT 15
 
 extern int verbose;
 
@@ -164,19 +170,21 @@ ipmi_openipmi_send_cmd(struct ipmi_intf * intf, struct ipmi_rq * req)
 	struct ipmi_recv recv;
 	struct ipmi_addr addr;
 	struct ipmi_system_interface_addr bmc_addr = {
-		addr_type:	IPMI_SYSTEM_INTERFACE_ADDR_TYPE,
-		channel:	IPMI_BMC_CHANNEL,
+		.addr_type = IPMI_SYSTEM_INTERFACE_ADDR_TYPE,
+		.channel = IPMI_BMC_CHANNEL,
 	};
 	struct ipmi_ipmb_addr ipmb_addr = {
-		addr_type:	IPMI_IPMB_ADDR_TYPE,
+		.addr_type = IPMI_IPMB_ADDR_TYPE,
 	};
 	struct ipmi_req _req;
 	static struct ipmi_rs rsp;
+	struct timeval read_timeout;
 	static int curr_seq = 0;
 	fd_set rset;
 
 	uint8_t * data = NULL;
 	int data_len = 0;
+	int retval = 0;
 
 
 	if (intf == NULL || req == NULL)
@@ -325,14 +333,23 @@ ipmi_openipmi_send_cmd(struct ipmi_intf * intf, struct ipmi_rq * req)
 
 	FD_ZERO(&rset);
 	FD_SET(intf->fd, &rset);
-
-	if (select(intf->fd+1, &rset, NULL, NULL, NULL) < 0) {
+	read_timeout.tv_sec = IPMI_OPENIPMI_READ_TIMEOUT;
+	read_timeout.tv_usec = 0;
+	retval = select(intf->fd+1, &rset, NULL, NULL, &read_timeout);
+	if (retval < 0) {
 	   lperror(LOG_ERR, "I/O Error");
 	   if (data != NULL) {
 	      free(data);
 				data = NULL;
 		 }
 	   return NULL;
+	} else if (retval == 0) {
+		lprintf(LOG_ERR, "No data available");
+		if (data != NULL) {
+			free(data);
+			data = NULL;
+		}
+		return NULL;
 	}
 	if (FD_ISSET(intf->fd, &rset) == 0) {
 	   lprintf(LOG_ERR, "No data available");
@@ -375,8 +392,6 @@ ipmi_openipmi_send_cmd(struct ipmi_intf * intf, struct ipmi_rq * req)
 	}
 
 	if(intf->transit_addr != 0 && intf->transit_addr != intf->my_addr) {
-	   uint8_t index = 0;
-     
 	   /* ipmb_addr.transit_slave_addr = intf->transit_addr; */
 	   lprintf(LOG_DEBUG, "Decapsulating data received from transit "
 		   "IPMB target @ 0x%x", intf->transit_addr);
@@ -432,13 +447,13 @@ int ipmi_openipmi_setup(struct ipmi_intf * intf)
 }
 
 struct ipmi_intf ipmi_open_intf = {
-	name:		"open",
-	desc:		"Linux OpenIPMI Interface",
-	setup:		ipmi_openipmi_setup,
-	open:		ipmi_openipmi_open,
-	close:		ipmi_openipmi_close,
-	sendrecv:	ipmi_openipmi_send_cmd,
-	set_my_addr:	ipmi_openipmi_set_my_addr,
-	my_addr:	IPMI_BMC_SLAVE_ADDR,
-	target_addr:	0, /* init so -m local_addr does not cause bridging */
+	.name = "open",
+	.desc = "Linux OpenIPMI Interface",
+	.setup = ipmi_openipmi_setup,
+	.open = ipmi_openipmi_open,
+	.close = ipmi_openipmi_close,
+	.sendrecv = ipmi_openipmi_send_cmd,
+	.set_my_addr = ipmi_openipmi_set_my_addr,
+	.my_addr = IPMI_BMC_SLAVE_ADDR,
+	.target_addr = 0, /* init so -m local_addr does not cause bridging */
 };

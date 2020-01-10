@@ -50,6 +50,23 @@
 
 #define FRU_MULTIREC_CHUNK_SIZE     (255 + sizeof(struct fru_multirec_header))
 
+static const char *section_id[4] = {
+	"Internal Use Section",
+	"Chassis Section",
+	"Board Section",
+	"Product Section"
+};
+
+/* From lib/dimm_spd.c: */
+int
+ipmi_spd_print_fru(struct ipmi_intf * intf, uint8_t id);
+
+/* From src/plugins/ipmi_intf.c: */
+void
+ipmi_intf_set_max_request_data_size(struct ipmi_intf * intf, uint16_t size);
+void
+ipmi_intf_set_max_response_data_size(struct ipmi_intf * intf, uint16_t size);
+
 extern int verbose;
 
 static void ipmi_fru_read_to_bin(struct ipmi_intf * intf, char * pFileName, uint8_t fruId);
@@ -667,9 +684,9 @@ read_fru_area(struct ipmi_intf * intf, struct fru_info *fru, uint8_t id,
 			break;
 		}
 		if (rsp->ccode > 0) {
-			/* if we get C8h or CAh completion code then we requested too
+			/* if we get C7h or C8h or CAh return code then we requested too
 			* many bytes at once so try again with smaller size */
-			if ((rsp->ccode == 0xc8 || rsp->ccode == 0xca)
+			if ((rsp->ccode == 0xc7 || rsp->ccode == 0xc8 || rsp->ccode == 0xca)
 					&& fru->max_read_size > 8) {
 				if (fru->max_read_size > 32) {
 					/* subtract read length more aggressively */
@@ -810,12 +827,11 @@ fru_area_print_multirec_bloc(struct ipmi_intf * intf, struct fru_info * fru,
 			uint8_t id, uint32_t offset)
 {
 	uint8_t * fru_data = NULL;
-	uint32_t fru_len, i;
+	uint32_t i;
 	struct fru_multirec_header * h;
 	uint32_t last_off, len;
 
 	i = last_off = offset;
-	fru_len = 0;
 
 	fru_data = malloc(fru->size + 1);
 	if (fru_data == NULL) {
@@ -958,7 +974,7 @@ fru_area_print_chassis(struct ipmi_intf * intf, struct fru_info * fru,
 		}
 	}
 
-	if (fru_area != NULL) {
+	if (fru_data != NULL) {
 		free(fru_data);
 		fru_data = NULL;
 	}
@@ -1082,7 +1098,7 @@ fru_area_print_board(struct ipmi_intf * intf, struct fru_info * fru,
 			break;
 	}
 
-	if (fru_area != NULL) {
+	if (fru_data != NULL) {
 		free(fru_data);
 		fru_data = NULL;
 	}
@@ -1217,7 +1233,7 @@ fru_area_print_product(struct ipmi_intf * intf, struct fru_info * fru,
 			break;
 	}
 
-	if (fru_area != NULL) {
+	if (fru_data != NULL) {
 		free(fru_data);
 		fru_data = NULL;
 	}
@@ -1564,8 +1580,6 @@ static void ipmi_fru_oemkontron_get( int argc, char ** argv,uint8_t * fru_data,
 	static int badParams=FALSE;
 	int start = off;
 	int offset = start;
-	int length = len;
-	int i;
 	offset += sizeof(struct fru_multirec_oem_header);
 
 	if(!badParams){
@@ -1594,7 +1608,6 @@ static void ipmi_fru_oemkontron_get( int argc, char ** argv,uint8_t * fru_data,
 			printf("Kontron OEM Information Record\n");
 			version = oh->record_version;
 
-			int blockstart;
 			uint8_t blockCount;
 			uint8_t blockIndex=0;
 
@@ -1615,7 +1628,6 @@ static void ipmi_fru_oemkontron_get( int argc, char ** argv,uint8_t * fru_data,
 				void * pRecordData;
 				uint8_t nameLen;
 
-				blockstart = offset;
 				nameLen = ( fru_data[offset++] &= 0x3F );
 				printf("  Name: %*.*s\n",nameLen, nameLen, (const char *)(fru_data+offset));
 
@@ -1745,7 +1757,6 @@ static int ipmi_fru_oemkontron_edit( int argc, char ** argv,uint8_t * fru_data,
 			version = oh->record_version;
 
 			if( version == formatVersion  ){
-				int blockstart;
 				uint8_t blockCount;
 				uint8_t blockIndex=0;
 
@@ -1766,8 +1777,6 @@ static int ipmi_fru_oemkontron_edit( int argc, char ** argv,uint8_t * fru_data,
 				for(blockIndex=0;blockIndex<blockCount;blockIndex++){
 					void * pRecordData;
 					uint8_t nameLen;
-
-					blockstart = offset;
 
 					nameLen = ( fru_data[offset++] & 0x3F );
 
@@ -2147,7 +2156,6 @@ static void ipmi_fru_picmg_ext_print(uint8_t * fru_data, int off, int length)
 		{
 			unsigned int entries;
 			unsigned int feeds;
-			unsigned int feedcnt;
 			unsigned int hwaddr;
 			unsigned int i;
 			unsigned int id;
@@ -2280,8 +2288,7 @@ static void ipmi_fru_picmg_ext_print(uint8_t * fru_data, int off, int length)
 				printf("      Link Type Extension:  0x%02x - ",
 						d->ext);
 				if (d->type == FRU_PICMGEXT_LINK_TYPE_BASE) {
-					switch (d->ext)
-					{
+					switch (d->ext) {
 						case 0:
 							printf("10/100/1000BASE-T Link (four-pair)\n");
 							break;
@@ -2289,76 +2296,93 @@ static void ipmi_fru_picmg_ext_print(uint8_t * fru_data, int off, int length)
 							printf("ShMC Cross-connect (two-pair)\n");
 							break;
 						default:
-							printf("Unknwon\n");
+							printf("Unknown\n");
 							break;
 					}
 				} else if (d->type == FRU_PICMGEXT_LINK_TYPE_FABRIC_ETHERNET) {
-					switch (d->ext)
-					{
+					switch (d->ext) {
 						case 0:
-							printf("Fixed 1000Base-BX\n");
+							printf("1000Base-BX\n");
 							break;
 						case 1:
-							printf("Fixed 10GBASE-BX4 [XAUI]\n");
+							printf("10GBase-BX4 [XAUI]\n");
 							break;
 						case 2:
 							printf("FC-PI\n");
 							break;
+						case 3:
+							printf("1000Base-KX\n");
+							break;
+						case 4:
+							printf("10GBase-KX4\n");
+							break;
 						default:
-							printf("Unknwon\n");
+							printf("Unknown\n");
+							break;
+					}
+				} else if (d->type == FRU_PICMGEXT_LINK_TYPE_FABRIC_ETHERNET_10GBD) {
+					switch (d->ext) {
+						case 0:
+							printf("10GBase-KR\n");
+							break;
+						case 1:
+							printf("40GBase-KR4\n");
+							break;
+						default:
+							printf("Unknown\n");
 							break;
 					}
 				} else if (d->type == FRU_PICMGEXT_LINK_TYPE_FABRIC_INFINIBAND) {
-					printf("Unknwon\n");
+					printf("Unknown\n");
 				} else if (d->type == FRU_PICMGEXT_LINK_TYPE_FABRIC_STAR) {
-					printf("Unknwon\n");
+					printf("Unknown\n");
 				} else if (d->type == FRU_PICMGEXT_LINK_TYPE_PCIE) {
-					printf("Unknwon\n");
+					printf("Unknown\n");
 				} else {
-					printf("Unknwon\n");
+					printf("Unknown\n");
 				}
 
 				printf("      Link Type:            0x%02x - ",
 						d->type);
-				if (d->type == 0 || d->type == 0xff) {
-					printf("Reserved\n");
-				}
-				else if (d->type >= 0x06 && d->type <= 0xef) {
-					printf("Reserved\n");
-				}
-				else if (d->type >= 0xf0 && d->type <= 0xfe) {
-					printf("OEM GUID Definition\n");
-				}
-				else {
-					switch (d->type)
-					{
-						case FRU_PICMGEXT_LINK_TYPE_BASE:
-							printf("PICMG 3.0 Base Interface 10/100/1000\n");
-							break;
-						case FRU_PICMGEXT_LINK_TYPE_FABRIC_ETHERNET:
-							printf("PICMG 3.1 Ethernet Fabric Interface\n");
-							break;
-						case FRU_PICMGEXT_LINK_TYPE_FABRIC_INFINIBAND:
-							printf("PICMG 3.2 Infiniband Fabric Interface\n");
-							break;
-						case FRU_PICMGEXT_LINK_TYPE_FABRIC_STAR:
-							printf("PICMG 3.3 Star Fabric Interface\n");
-							break;
-						case  FRU_PICMGEXT_LINK_TYPE_PCIE:
-							printf("PICMG 3.4 PCI Express Fabric Interface\n");
-							break;
-						default:
+				switch (d->type) {
+					case FRU_PICMGEXT_LINK_TYPE_BASE:
+						printf("PICMG 3.0 Base Interface 10/100/1000\n");
+						break;
+					case FRU_PICMGEXT_LINK_TYPE_FABRIC_ETHERNET:
+						printf("PICMG 3.1 Ethernet Fabric Interface\n");
+						printf("                                   Base signaling Link Class\n");
+						break;
+					case FRU_PICMGEXT_LINK_TYPE_FABRIC_INFINIBAND:
+						printf("PICMG 3.2 Infiniband Fabric Interface\n");
+						break;
+					case FRU_PICMGEXT_LINK_TYPE_FABRIC_STAR:
+						printf("PICMG 3.3 Star Fabric Interface\n");
+						break;
+					case  FRU_PICMGEXT_LINK_TYPE_PCIE:
+						printf("PICMG 3.4 PCI Express Fabric Interface\n");
+						break;
+					case FRU_PICMGEXT_LINK_TYPE_FABRIC_ETHERNET_10GBD:
+						printf("PICMG 3.1 Ethernet Fabric Interface\n");
+						printf("                                   10.3125Gbd signaling Link Class\n");
+						break;
+					default:
+						if (d->type == 0 || d->type == 0xff) {
+							printf("Reserved\n");
+						} else if (d->type >= 0x06 && d->type <= 0xef) {
+							printf("Reserved\n");
+						} else if (d->type >= 0xf0 && d->type <= 0xfe) {
+							printf("OEM GUID Definition\n");
+						} else {
 							printf("Invalid\n");
-							break;
-					}
+						}
+						break;
 				}
 				printf("      Link Designator: \n");
 				printf("        Port Flag:            0x%02x\n",
 						d->desig_port);
 				printf("        Interface:            0x%02x - ",
 						d->desig_if);
-				switch (d->desig_if)
-				{
+				switch (d->desig_if) {
 					case FRU_PICMGEXT_DESIGN_IF_BASE:
 						printf("Base Interface\n");
 						break;
@@ -3360,6 +3384,9 @@ ipmi_fru_edit_multirec(struct ipmi_intf * intf, uint8_t id ,
 	retStatus = ipmi_fru_get_multirec_location_from_fru(intf, id, &fruInfo,
 								&offFruMultiRec,
 								&fruMultiRecSize);
+	if (retStatus != 0) {
+		return retStatus;
+	}
 
 
 	lprintf(LOG_DEBUG, "FRU Size        : %lu\n", fruMultiRecSize);
@@ -3409,14 +3436,13 @@ ipmi_fru_edit_multirec(struct ipmi_intf * intf, uint8_t id ,
 
 	{
 		uint8_t * fru_data;
-		uint32_t fru_len, i;
+		uint32_t i;
 		uint32_t offset= offFruMultiRec;
 		struct fru_multirec_header * h;
 		uint32_t last_off, len;
 		uint8_t error=0;
 
 		i = last_off = offset;
-		fru_len = 0;
 
 		memset(&fru, 0, sizeof(fru));
 		fru_data = malloc(fru.size + 1);
@@ -3563,6 +3589,9 @@ ipmi_fru_get_multirec(struct ipmi_intf * intf, uint8_t id ,
 	retStatus = ipmi_fru_get_multirec_location_from_fru(intf, id, &fruInfo,
 								&offFruMultiRec,
 								&fruMultiRecSize);
+	if (retStatus != 0) {
+		return retStatus;
+	}
 
 
 	lprintf(LOG_DEBUG, "FRU Size        : %lu\n", fruMultiRecSize);
@@ -3612,14 +3641,13 @@ ipmi_fru_get_multirec(struct ipmi_intf * intf, uint8_t id ,
 
 	{
 		uint8_t * fru_data;
-		uint32_t fru_len, i;
+		uint32_t i;
 		uint32_t offset= offFruMultiRec;
 		struct fru_multirec_header * h;
 		uint32_t last_off, len;
 		uint8_t error=0;
 
 		i = last_off = offset;
-		fru_len = 0;
 
 		fru_data = malloc(fru.size + 1);
 		if (fru_data == NULL) {
@@ -3700,7 +3728,7 @@ ipmi_fru_upg_ekeying(struct ipmi_intf * intf,
 			char * pFileName,
 			uint8_t fruId)
 {
-	struct fru_info fruInfo;
+	struct fru_info fruInfo = {0};
 	uint8_t *buf = NULL;
 	uint32_t offFruMultiRec = 0;
 	uint32_t fruMultiRecSize = 0;
@@ -4775,13 +4803,12 @@ f_type, uint8_t f_index, char *f_string)
 
 		checksum = 0;
 		/* Calculate Header Checksum */
-		for( i = header_offset; i < header_offset
-						+ fru_section_len - 1; i ++ )
+		for (i = 0; i < fru_section_len - 1; i++)
 		{
 			checksum += fru_data[i];
 		}
 		checksum = (~checksum) + 1;
-		fru_data[header_offset + fru_section_len - 1] = checksum;
+		fru_data[fru_section_len - 1] = checksum;
 
 		/* Write the updated section to the FRU data; source offset => 0 */
 		if( write_fru_area(intf, &fru, fruId, 0,
@@ -4850,14 +4877,12 @@ ipmi_fru_set_field_string_rebuild(struct ipmi_intf * intf, uint8_t fruId,
 											struct fru_info fru, struct fru_header header,
 											uint8_t f_type, uint8_t f_index, char *f_string)
 {
-	uint8_t msg_data[4];
-	uint8_t checksum;
 	int i = 0;
 	uint8_t *fru_data_old = NULL;
 	uint8_t *fru_data_new = NULL;
 	uint8_t *fru_area = NULL;
 	uint32_t fru_field_offset, fru_field_offset_tmp;
-	uint32_t fru_section_len, old_section_len, header_offset;
+	uint32_t fru_section_len, header_offset;
 	uint32_t chassis_offset, board_offset, product_offset;
 	uint32_t chassis_len, board_len, product_len, product_len_new;
 	int      num_byte_change = 0, padding_len = 0;
@@ -4930,9 +4955,6 @@ ipmi_fru_set_field_string_rebuild(struct ipmi_intf * intf, uint8_t fruId,
 		rc = (-1);
 		goto ipmi_fru_set_field_string_rebuild_out;
 	}
-
-	/* Keep length for future old section display */
-	old_section_len = fru_section_len;
 
 	/*************************
 	3) Seek to field index */
@@ -5048,6 +5070,11 @@ ipmi_fru_set_field_string_rebuild(struct ipmi_intf * intf, uint8_t fruId,
 			header.offset.product += change_size_by_8;
 		}
 
+		if ((f_type == 'c' ) || (f_type == 'b' ) || (f_type == 'p' )) {
+			printf("Change multi offset from %d to %d\n", header.offset.multi, header.offset.multi + change_size_by_8);
+			header.offset.multi += change_size_by_8;
+		}
+
 		/* Adjust length of the section */
 		if (f_type == 'c')
 		{
@@ -5146,31 +5173,6 @@ ipmi_fru_set_field_string_rebuild(struct ipmi_intf * intf, uint8_t fruId,
 
 		#ifdef DBG_RESIZE_FRU
 		printf("Calculate New Checksum: %x\n", (0 - cksum));
-		#endif
-
-		/****** ENABLE to show section modified before and after ********/
-		#if 0
-		printf("Section: ");
-		for( counter = 0; counter <old_section_len; counter ++ )
-		{
-			if((counter %16) == 0)
-			{
-				printf("\n");
-			}
-			printf( "%02X ", *(fru_data_old + header_offset + counter) );
-		}
-		printf("\n");
-
-		printf("Section: ");
-		for( counter = 0; counter <fru_section_len; counter ++ )
-		{
-			if((counter %16) == 0)
-			{
-				printf("\n");
-			}
-			printf( "%02X ", *(fru_data_new + header_offset + counter) );
-		}
-		printf("\n");
 		#endif
 	}
 	else

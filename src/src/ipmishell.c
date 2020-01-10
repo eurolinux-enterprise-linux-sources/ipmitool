@@ -29,6 +29,9 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _SVID_SOURCE || _BSD_SOURCE || _XOPEN_SOURCE >= 500 || \
+	_XOPEN_SOURCE && _XOPEN_SOURCE_EXTENDED || \
+	/* Since glibc 2.12: */ _POSIX_C_SOURCE >= 200809L
 
 #include <stdio.h>
 #include <unistd.h>
@@ -301,7 +304,7 @@ int ipmi_set_main(struct ipmi_intf * intf, int argc, char ** argv)
 			return (-1);
 		}
 		printf("Set session hostname to %s\n",
-				intf->session->hostname);
+				intf->ssn_params.hostname);
 	}
 	else if (strncmp(argv[0], "user", 4) == 0 ||
 		 strncmp(argv[0], "username", 8) == 0) {
@@ -311,7 +314,7 @@ int ipmi_set_main(struct ipmi_intf * intf, int argc, char ** argv)
 			return (-1);
 		}
 		printf("Set session username to %s\n",
-				intf->session->username);
+				intf->ssn_params.username);
 	}
 	else if (strncmp(argv[0], "pass", 4) == 0 ||
 		 strncmp(argv[0], "password", 8) == 0) {
@@ -336,7 +339,7 @@ int ipmi_set_main(struct ipmi_intf * intf, int argc, char ** argv)
 			return (-1);
 		}
 		printf("Set session authtype to %s\n",
-		       val2str(intf->session->authtype_set,
+		       val2str(intf->ssn_params.authtype_set,
 				   ipmi_authtype_session_vals));
 	}
 	else if (strncmp(argv[0], "privlvl", 7) == 0) {
@@ -354,7 +357,7 @@ int ipmi_set_main(struct ipmi_intf * intf, int argc, char ** argv)
 			return (-1);
 		}
 		printf("Set session privilege level to %s\n",
-		       val2str(intf->session->privlvl,
+		       val2str(intf->ssn_params.privlvl,
 				   ipmi_privlvl_vals));
 	}
 	else if (strncmp(argv[0], "port", 4) == 0) {
@@ -369,7 +372,7 @@ int ipmi_set_main(struct ipmi_intf * intf, int argc, char ** argv)
 			lprintf(LOG_ERR, "Failed to set session port.");
 			return (-1);
 		}
-		printf("Set session port to %d\n", intf->session->port);
+		printf("Set session port to %d\n", intf->ssn_params.port);
 	}
 	else if (strncmp(argv[0], "localaddr", 9) == 0) {
 		uint8_t my_addr = 0;
@@ -467,6 +470,10 @@ int ipmi_exec_main(struct ipmi_intf * intf, int argc, char ** argv)
 				__argv[__argc++] = strdup(tok);
 				if (__argv[__argc-1] == NULL) {
 					lprintf(LOG_ERR, "ipmitool: malloc failure");
+					if (fp) {
+						fclose(fp);
+						fp = NULL;
+					}
 					return -1;
 				}
 				tmp = __argv[__argc-1];

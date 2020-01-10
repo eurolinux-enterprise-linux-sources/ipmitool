@@ -512,7 +512,7 @@ _set_command_enables(struct ipmi_intf * intf,
 {
 	struct ipmi_rs * rsp;
 	struct ipmi_rq req;
-	unsigned char * d, rqdata[19];
+	unsigned char rqdata[19];
 	unsigned int c;
 
 	if (!p || !lnfn) {
@@ -568,8 +568,6 @@ _set_command_enables(struct ipmi_intf * intf,
 		return -1;
 	}
 
-	d = rsp->data;
-
 	memset(&req, 0, sizeof(req));
 	req.msg.netfn = IPMI_NETFN_APP;
 	req.msg.cmd = BMC_SET_COMMAND_ENABLES;
@@ -591,7 +589,6 @@ _set_command_enables(struct ipmi_intf * intf,
 		return -1;
 	}
 
-	d = rsp->data;
 	return 0;
 }
 
@@ -902,7 +899,7 @@ static int
 ipmi_firewall_info(struct ipmi_intf * intf, int argc, char ** argv)
 {
 	int ret = 0;
-	struct ipmi_function_params p = {0xe, -1, -1, -1, -1};
+	struct ipmi_function_params p = {0xe, -1, -1, -1, -1, 0};
 	struct bmc_fn_support * bmc_fn_support;
 	unsigned int l, n, c;
 
@@ -1015,9 +1012,10 @@ ipmi_firewall_info(struct ipmi_intf * intf, int argc, char ** argv)
 static int
 ipmi_firewall_enable_disable(struct ipmi_intf * intf, int enable, int argc, char ** argv)
 {
-	struct ipmi_function_params p = {0xe, -1, -1, -1, -1};
+	struct ipmi_function_params p = {0xe, -1, -1, -1, -1, 0};
 	struct bmc_fn_support * bmc_fn_support;
-	unsigned int l, n, c, ret;
+	int ret;
+	unsigned int l, n, c;
 	unsigned char enables[MAX_COMMAND_BYTES];
 
 	if (argc < 1 || strncmp(argv[0], "help", 4) == 0) {
@@ -1105,12 +1103,17 @@ ipmi_firewall_enable_disable(struct ipmi_intf * intf, int enable, int argc, char
 static int
 ipmi_firewall_reset(struct ipmi_intf * intf, int argc, char ** argv)
 {
-	struct ipmi_function_params p = {0xe, -1, -1, -1, -1};
+	struct ipmi_function_params p = {0xe, -1, -1, -1, -1, 0};
 	struct bmc_fn_support * bmc_fn_support;
-	unsigned int l, n, c, ret;
+	int ret;
+	unsigned int l, n, c;
 	unsigned char enables[MAX_COMMAND_BYTES];
 
-	if (argc > 0 || (argc > 0 && strncmp(argv[0], "help", 4) == 0)) {
+	if (argc < 1) {
+		lprintf(LOG_ERR, "Not enough parameters given.");
+		printf_firewall_usage();
+		return (-1);
+	} else if (argc > 0 && strncmp(argv[0], "help", 4) == 0) {
 		printf_firewall_usage();
 		return 0;
 	}
@@ -1132,8 +1135,8 @@ ipmi_firewall_reset(struct ipmi_intf * intf, int argc, char ** argv)
 
 	for (l=0; l<MAX_LUN; l++) {
 		p.lun = l;
-		for (n=0; n<MAX_NETFN; n+=2) {
-			p.netfn = n;
+		for (n=0; n<MAX_NETFN_PAIR; n++) {
+			p.netfn = n*2;
 			for (c=0; c<MAX_COMMAND; c++) {
 				p.command = c;
 				printf("reset lun %d, netfn %d, command %d, subfn\n", l, n, c);

@@ -111,8 +111,9 @@ target_triplet = @target@
 subdir = .
 DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 	$(top_srcdir)/configure $(am__configure_deps) \
-	$(srcdir)/config.h.in AUTHORS COPYING ChangeLog README compile \
-	config.guess config.sub depcomp install-sh missing ltmain.sh
+	$(srcdir)/config.h.in AUTHORS COPYING ChangeLog INSTALL NEWS \
+	README compile config.guess config.sub depcomp install-sh \
+	missing ltmain.sh
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
@@ -274,6 +275,8 @@ INTF_OPEN = @INTF_OPEN@
 INTF_OPEN_LIB = @INTF_OPEN_LIB@
 INTF_SERIAL = @INTF_SERIAL@
 INTF_SERIAL_LIB = @INTF_SERIAL_LIB@
+INTF_USB = @INTF_USB@
+INTF_USB_LIB = @INTF_USB_LIB@
 IPMITOOL_INTF_LIB = @IPMITOOL_INTF_LIB@
 LD = @LD@
 LDFLAGS = @LDFLAGS@
@@ -370,7 +373,7 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 DOCDIR = $(datadir)/doc/$(PACKAGE)
 DOCLIST = $(top_srcdir)/README $(top_srcdir)/COPYING $(top_srcdir)/AUTHORS $(top_srcdir)/ChangeLog
-EXTRA_DIST = $(DOCLIST)
+EXTRA_DIST = $(DOCLIST) bootstrap
 AUTOMAKE_OPTIONS = dist-bzip2
 MAINTAINERCLEANFILES = Makefile.in aclocal.m4 configure configure-stamp \
 	config.guess config.sub depcomp install-sh ltmain.sh missing \

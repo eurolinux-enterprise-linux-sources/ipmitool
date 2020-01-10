@@ -29,6 +29,7 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _XOPEN_SOURCE
 
 #include <stdlib.h>
 #include <string.h>
@@ -413,7 +414,6 @@ ipmi_isol_deactivate(struct ipmi_intf * intf)
 	struct ipmi_rs * rsp;
 	struct ipmi_rq   req;
 	uint8_t    data[6];	 
-	struct isol_config_parameters params;
 
 	memset(&req, 0, sizeof(req));
 	req.msg.netfn = IPMI_NETFN_ISOL;

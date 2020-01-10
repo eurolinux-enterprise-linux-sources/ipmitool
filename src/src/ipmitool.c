@@ -65,6 +65,7 @@
 #include <ipmitool/ipmi_ekanalyzer.h>
 #include <ipmitool/ipmi_ime.h>
 #include <ipmitool/ipmi_dcmi.h>
+#include <ipmitool/ipmi_vita.h>
 
 #ifdef HAVE_CONFIG_H
 # include <config.h>
@@ -76,6 +77,7 @@ extern int ipmi_shell_main(struct ipmi_intf * intf, int argc, char ** argv);
 extern int ipmi_echo_main(struct ipmi_intf * intf, int argc, char ** argv);
 extern int ipmi_set_main(struct ipmi_intf * intf, int argc, char ** argv);
 extern int ipmi_exec_main(struct ipmi_intf * intf, int argc, char ** argv);
+extern int ipmi_lan6_main(struct ipmi_intf *intf, int argc, char **argv);
 
 
 int csv_output = 0;
@@ -103,7 +105,8 @@ struct ipmi_cmd ipmitool_cmd_list[] = {
 	{ ipmi_user_main,    "user",    "Configure Management Controller users" },
 	{ ipmi_channel_main, "channel", "Configure Management Controller channels" },
 	{ ipmi_session_main, "session", "Print session information" },
-    { ipmi_dcmi_main,    "dcmi",    "Data Center Management Interface"},
+	{ ipmi_dcmi_main,    "dcmi",    "Data Center Management Interface"},
+	{ ipmi_nm_main,      "nm",      "Node Manager Interface"},
 	{ ipmi_sunoem_main,  "sunoem",  "OEM Commands for Sun servers" },
 	{ ipmi_kontronoem_main, "kontronoem", "OEM Commands for Kontron devices"},
 	{ ipmi_picmg_main,   "picmg",   "Run a PICMG/ATCA extended cmd"},
@@ -119,6 +122,8 @@ struct ipmi_cmd ipmitool_cmd_list[] = {
 	{ ipmi_hpmfwupg_main,"hpm", "Update HPM components using PICMG HPM.1 file"},
 	{ ipmi_ekanalyzer_main,"ekanalyzer", "run FRU-Ekeying analyzer using FRU files"},
 	{ ipmi_ime_main,          "ime", "Update Intel Manageability Engine Firmware"},
+	{ ipmi_vita_main,   "vita",   "Run a VITA 46.11 extended cmd"},
+	{ ipmi_lan6_main,   "lan6",   "Configure IPv6 LAN Channels"},
 	{ NULL },
 };
 

@@ -1,43 +1,7 @@
-From 2e8c763e11b8b983e229f50dec9ddf98c07ff5bb Mon Sep 17 00:00:00 2001
-From: Boris Ranto <branto@redhat.com>
-Date: Fri, 6 Nov 2015 12:32:45 +0100
-Subject: [PATCH 04/11] ipmitool-1.8.11-set-kg-key.patch
-
-503039 - [RHEL5] can't set k-g key in ipmitool
-
-Following patch implements "Set Channel Security Keys" command. It
-allows users to set K_g key. Other variants of the command, like set K_r
-keys or read both K_g and K_r keys, were not implemented (it won't be
-difficult though).
-
-Usage:
-* ipmitool channel setkg plain opensesame
-* ipmitool channel setkg hex 00000000001
-
-Tested on Dell PowerEdge 1950.
-
-As consequence, I moved ipmi_parse_hex() to lib/helper.c, now it's used
-by more modules.
-
-Sent upstream as
-http://sourceforge.net/mailarchive/message.php?msg_name=20090602140420.8553.84958.stgit%40dhcp-lab-214.englab.brq.redhat.com
-
-Backported by: jsafrane
----
- doc/ipmitool.1                  |  14 ++++++
- include/ipmitool/helper.h       |   4 ++
- include/ipmitool/ipmi_channel.h |  37 +++++++++++++++
- include/ipmitool/ipmi_intf.h    |   1 -
- lib/helper.c                    |  63 +++++++++++++++++++++++++
- lib/ipmi_channel.c              | 100 ++++++++++++++++++++++++++++++++++++++++
- lib/ipmi_main.c                 |  63 -------------------------
- 7 files changed, 218 insertions(+), 64 deletions(-)
-
-diff --git a/doc/ipmitool.1 b/doc/ipmitool.1
-index 2c20821..4f9c877 100644
---- a/doc/ipmitool.1
-+++ b/doc/ipmitool.1
-@@ -371,6 +371,20 @@ Configure user access information on the given channel for the given userid.
+diff -urNp old/doc/ipmitool.1 new/doc/ipmitool.1
+--- old/doc/ipmitool.1	2017-02-06 10:20:02.254362909 +0100
++++ new/doc/ipmitool.1	2017-02-06 10:33:41.729294474 +0100
+@@ -372,6 +372,20 @@ Configure user access information on the
  
  Displays the list of cipher suites supported for the given
  application (ipmi or sol) on the given channel.
@@ -58,10 +22,9 @@ index 2c20821..4f9c877 100644
  .RE
  .RE
  .TP 
-diff --git a/include/ipmitool/helper.h b/include/ipmitool/helper.h
-index b6ee7fa..61723f1 100644
---- a/include/ipmitool/helper.h
-+++ b/include/ipmitool/helper.h
+diff -urNp old/include/ipmitool/helper.h new/include/ipmitool/helper.h
+--- old/include/ipmitool/helper.h	2017-02-06 10:20:02.254362909 +0100
++++ new/include/ipmitool/helper.h	2017-02-06 10:40:07.336136844 +0100
 @@ -58,6 +58,8 @@
  # define IPMI_UID_MAX 63
  #endif
@@ -71,33 +34,23 @@ index b6ee7fa..61723f1 100644
  struct ipmi_intf;
  
  struct valstr {
-@@ -101,6 +103,8 @@ FILE * ipmi_open_file(const char * file, int rw);
- void ipmi_start_daemon(struct ipmi_intf *intf);
- uint16_t ipmi_get_oem_id(struct ipmi_intf *intf);
- 
-+unsigned char *ipmi_parse_hex(const char *str);
-+
- #define ipmi_open_file_read(file)	ipmi_open_file(file, 0)
- #define ipmi_open_file_write(file)	ipmi_open_file(file, 1)
- 
-diff --git a/include/ipmitool/ipmi_channel.h b/include/ipmitool/ipmi_channel.h
-index 7cbb9ad..1485fa8 100644
---- a/include/ipmitool/ipmi_channel.h
-+++ b/include/ipmitool/ipmi_channel.h
-@@ -48,7 +48,10 @@
+diff -urNp old/include/ipmitool/ipmi_channel.h new/include/ipmitool/ipmi_channel.h
+--- old/include/ipmitool/ipmi_channel.h	2017-02-06 10:20:02.253316684 +0100
++++ new/include/ipmitool/ipmi_channel.h	2017-02-06 10:58:15.291287621 +0100
+@@ -49,6 +49,10 @@
  #define IPMI_GET_USER_NAME             0x46
  #define IPMI_SET_USER_PASSWORD         0x47
  #define IPMI_GET_CHANNEL_CIPHER_SUITES 0x54
 +#define IPMI_SET_CHANNEL_SECURITY_KEYS 0x56
- 
++
 +#define IPMI_KG_KEY_ID  1
 +#define IPMI_SET_CHANNEL_SECURITY_KEYS_OP_SET 1
  
- /*
-  * The Get Authentication Capabilities response structure
-@@ -249,6 +252,40 @@ struct set_user_access_data {
- #pragma pack(0)
- #endif
+ /* These are for channel_info_t.session_support */
+ #define IPMI_CHANNEL_SESSION_LESS 0x00
+@@ -137,6 +141,40 @@ int _ipmi_set_channel_access(struct ipmi
+ 		struct channel_access_t channel_access, uint8_t access_option,
+ 		uint8_t privilege_option);
  
 +struct set_channel_security_keys_req {
 +#if WORDS_BIGENDIAN
@@ -136,134 +89,64 @@ index 7cbb9ad..1485fa8 100644
  uint8_t ipmi_get_channel_medium(struct ipmi_intf * intf, uint8_t channel);
  uint8_t ipmi_current_channel_medium(struct ipmi_intf * intf);
  int ipmi_channel_main(struct ipmi_intf * intf, int argc, char ** argv);
-diff --git a/include/ipmitool/ipmi_intf.h b/include/ipmitool/ipmi_intf.h
-index f9f6592..0fb157e 100644
---- a/include/ipmitool/ipmi_intf.h
-+++ b/include/ipmitool/ipmi_intf.h
+diff -urNp old/include/ipmitool/ipmi_intf.h new/include/ipmitool/ipmi_intf.h
+--- old/include/ipmitool/ipmi_intf.h	2017-02-06 10:20:02.254362909 +0100
++++ new/include/ipmitool/ipmi_intf.h	2017-02-06 10:40:40.264577602 +0100
 @@ -60,7 +60,6 @@ enum LANPLUS_SESSION_STATE {
  
  #define IPMI_AUTHCODE_BUFFER_SIZE 20
- #define IPMI_SIK_BUFFER_SIZE      20
+ #define IPMI_SIK_BUFFER_SIZE      IPMI_MAX_MD_SIZE
 -#define IPMI_KG_BUFFER_SIZE       21 /* key plus null byte */
  
- struct ipmi_session {
- 	char *hostname; /* Numeric IP adress or DNS name - see RFC 1034/RFC 1035 */
-diff --git a/lib/helper.c b/lib/helper.c
-index 95d641e..d934fc0 100644
---- a/lib/helper.c
-+++ b/lib/helper.c
-@@ -788,3 +788,66 @@ ipmi_get_oem_id(struct ipmi_intf *intf)
- 
- 	return oem_id;
- }
-+
-+/* ipmi_parse_hex - convert hexadecimal numbers to ascii string
-+ *                  Input string must be composed of two-characer hexadecimal numbers.
-+ *                  There is no separator between the numbers. Each number results in one character
-+ *                  of the converted string.
-+ *
-+ *                  Example: ipmi_parse_hex("50415353574F5244") returns 'PASSWORD'
-+ *
-+ * @param str:  input string. It must contain only even number of '0'-'9','a'-'f' and 'A-F' characters.
-+ * @returns converted ascii string
-+ * @returns NULL on error
-+ */
-+unsigned char *
-+ipmi_parse_hex(const char *str)
-+{
-+	const char * p;
-+	unsigned char * out, *q;
-+	unsigned char b = 0;
-+	int shift = 4;
-+
-+	if (strlen(str) == 0)
-+		return NULL;
-+
-+	if (strlen(str) % 2 != 0) {
-+		lprintf(LOG_ERR, "Number of hex_kg characters is not even");
-+		return NULL;
-+	}
-+
-+	if (strlen(str) > (IPMI_KG_BUFFER_SIZE-1)*2) {
-+		lprintf(LOG_ERR, "Kg key is too long");
-+		return NULL;
-+	}
-+
-+	out = calloc(IPMI_KG_BUFFER_SIZE, sizeof(unsigned char));
-+	if (out == NULL) {
-+		lprintf(LOG_ERR, "malloc failure");
-+		return NULL;
-+	}
-+
-+	for (p = str, q = out; *p; p++) {
-+		if (!isxdigit(*p)) {
-+			lprintf(LOG_ERR, "Kg_hex is not hexadecimal number");
-+			free(out);
-+			out = NULL;
-+			return NULL;
-+		}
-+
-+		if (*p < 'A') /* it must be 0-9 */
-+			b = *p - '0';
-+		else /* it's A-F or a-f */
-+			b = (*p | 0x20) - 'a' + 10; /* convert to lowercase and to 10-15 */
-+
-+		*q = *q + b << shift;
-+		if (shift)
-+			shift = 0;
-+		else {
-+			shift = 4;
-+			q++;
-+		}
-+	}
-+
-+	return out;
-+}
-diff --git a/lib/ipmi_channel.c b/lib/ipmi_channel.c
-index 43db338..634b4d1 100644
---- a/lib/ipmi_channel.c
-+++ b/lib/ipmi_channel.c
-@@ -786,6 +786,90 @@ ipmi_current_channel_medium(struct ipmi_intf * intf)
- 	return ipmi_get_channel_medium(intf, 0xE);
+ struct ipmi_session_params {
+ 	char * hostname;
+diff -urNp old/lib/ipmi_channel.c new/lib/ipmi_channel.c
+--- old/lib/ipmi_channel.c	2017-02-06 10:20:02.255409134 +0100
++++ new/lib/ipmi_channel.c	2017-02-06 12:32:14.222282317 +0100
+@@ -821,6 +821,92 @@ ipmi_set_user_access(struct ipmi_intf *i
+ 	return 0;
  }
  
 +int 
-+ipmi_set_channel_security_keys (struct ipmi_intf *intf, uint8_t channel,
-+		const char *method, const char *key)
++ipmi_set_channel_security_keys (struct ipmi_intf *intf, uint8_t channel, const char *method, const char *key)
 +{
-+	unsigned char* decoded_key = NULL;
++	uint8_t kgkey[IPMI_KG_BUFFER_SIZE];
 +	struct ipmi_rs *rsp;
 +	struct ipmi_rq req;
 +	struct set_channel_security_keys_req req_data;
++	int rc = -1;
 +	
 +	/* convert provided key to array of bytes */
 +	if (strcmp(method, "hex") == 0) {
 +		if (strlen(key) > (IPMI_KG_BUFFER_SIZE-1)*2) {
-+			lprintf(LOG_ERR, "Provided key is too long, max. length is 20 bytes");
++			lprintf(LOG_ERR, "Provided key is too long, max. length is %d bytes", (IPMI_KG_BUFFER_SIZE-1));
 +			printf_channel_usage();
 +			return -1;
 +		}
-+		decoded_key = ipmi_parse_hex(key);
-+		if (decoded_key == NULL) {
-+			/* something went bad, ipmi_parse_hex already reported the error */
-+			return -1;
-+		}
-+	} else if (strcmp(method, "plain") == 0) {
-+		if (strlen(key) > IPMI_KG_BUFFER_SIZE-1) {
-+			lprintf(LOG_ERR, "Provided key is too long, max. length is 20 bytes");
-+			printf_channel_usage();
-+			return -1;
++
++		rc = ipmi_parse_hex(key, kgkey, sizeof(kgkey)-1);
++		if (rc == -1) {
++			lprintf(LOG_ERR, "Number of Kg key characters is not even");
++			return rc;
++		} else if (rc == -3) {
++			lprintf(LOG_ERR, "Kg key is not hexadecimal number");
++			return rc;
++		} else if (rc > (IPMI_KG_BUFFER_SIZE-1)) {
++			lprintf(LOG_ERR, "Kg key is too long");
++			return rc;
 +		}
 +		
-+		decoded_key = calloc(IPMI_KG_BUFFER_SIZE, sizeof(unsigned char));
-+		if (decoded_key == NULL) {
-+			lprintf(LOG_ERR, "Cannot allocate memory");
-+			return -1;
++	} else if (strcmp(method, "plain") == 0) {
++		if (strlen(key) > IPMI_KG_BUFFER_SIZE-1) {
++			lprintf(LOG_ERR, "Provided key is too long, max. length is %d bytes", (IPMI_KG_BUFFER_SIZE -1));
++			printf_channel_usage();
++			return rc;
 +		}
-+		strncpy(decoded_key, key, IPMI_KG_BUFFER_SIZE-1);
++		
++		strncpy(kgkey, key, IPMI_KG_BUFFER_SIZE-1);
 +	} else {
 +		printf_channel_usage();
-+		return -1;
++		return rc;
 +	}
 +	
 +	/* assemble and send request to set kg key */
@@ -271,8 +154,7 @@ index 43db338..634b4d1 100644
 +	req_data.channel = channel;
 +	req_data.operation = IPMI_SET_CHANNEL_SECURITY_KEYS_OP_SET;
 +	req_data.key_id = IPMI_KG_KEY_ID;
-+	memcpy(req_data.key_value, decoded_key, IPMI_KG_BUFFER_SIZE-1);
-+	free(decoded_key);
++	memcpy(req_data.key_value, kgkey, IPMI_KG_BUFFER_SIZE-1);
 +	
 +	memset(&req, 0, sizeof(req));
 +	req.msg.netfn = IPMI_NETFN_APP;
@@ -283,7 +165,7 @@ index 43db338..634b4d1 100644
 +	rsp = intf->sendrecv(intf, &req);
 +	if (rsp == NULL) {
 +		lprintf(LOG_ERR, "Set Channel Security Keys command failed");
-+		return -1;
++		return rc;
 +	}
 +	if (rsp->ccode > 0) {
 +		const char *error = NULL;
@@ -304,30 +186,21 @@ index 43db338..634b4d1 100644
 +			error = val2str(rsp->ccode, completion_code_vals);
 +		}
 +		lprintf(LOG_ERR, "Error setting security key: %X (%s)", rsp->ccode, error);
-+		return -1;
++		return rc;
 +	}
 +	
 +	lprintf(LOG_NOTICE, "Set Channel Security Keys command succeeded");
 +	return 0;
 +}
 +
- void
- printf_channel_usage()
+ int
+ ipmi_channel_main(struct ipmi_intf *intf, int argc, char **argv)
  {
-@@ -795,6 +879,7 @@ printf_channel_usage()
- 		"<user id> [callin=on|off] [ipmi=on|off] [link=on|off] [privilege=level]");
- 	lprintf(LOG_NOTICE, "                  info      [channel number]");
- 	lprintf(LOG_NOTICE, "                  getciphers <ipmi | sol> [channel]\n");
-+	lprintf(LOG_NOTICE, "                  setkg hex|plain <key> [channel]\n");
- 	lprintf(LOG_NOTICE, "Possible privilege levels are:");
- 	lprintf(LOG_NOTICE, "   1   Callback level");
- 	lprintf(LOG_NOTICE, "   2   User level");
-@@ -892,6 +977,21 @@ ipmi_channel_main(struct ipmi_intf * intf, int argc, char ** argv)
- 								ch);
- 		}
- 	}
-+	else if (strcmp(argv[0], "setkg") == 0)
-+	{
+@@ -890,6 +976,19 @@ ipmi_channel_main(struct ipmi_intf *intf
+ 		retval = ipmi_get_channel_cipher_suites(intf,
+ 							argv[1], /* ipmi | sol */
+ 							channel);
++	} else if (strncmp(argv[0], "setkg", 5) == 0) {
 +		if (argc < 3 || argc > 4)
 +			printf_channel_usage();
 +		else {
@@ -340,84 +213,28 @@ index 43db338..634b4d1 100644
 +				
 +			retval = ipmi_set_channel_security_keys(intf, ch, method, key);
 +		}
-+	}
- 	else
- 	{
- 		printf("Invalid CHANNEL command: %s\n", argv[0]);
-diff --git a/lib/ipmi_main.c b/lib/ipmi_main.c
-index 2bbbe4b..b8c9e19 100644
---- a/lib/ipmi_main.c
-+++ b/lib/ipmi_main.c
-@@ -275,69 +275,6 @@ void ipmi_catch_sigint()
- 	exit(-1);
- }
+ 	} else {
+ 		lprintf(LOG_ERR, "Invalid CHANNEL command: %s\n", argv[0]);
+ 		printf_channel_usage();
+@@ -916,6 +1015,10 @@ printf_channel_usage()
+ 	lprintf(LOG_NOTICE,
+ "");
+ 	lprintf(LOG_NOTICE,
++"                  setkg hex|plain <key> [channel]");
++	lprintf(LOG_NOTICE,
++"");
++	lprintf(LOG_NOTICE,
+ "Possible privilege levels are:");
+ 	lprintf(LOG_NOTICE,
+ "   1   Callback level");
+diff -urNp old/src/plugins/ipmi_intf.c new/src/plugins/ipmi_intf.c
+--- old/src/plugins/ipmi_intf.c	2017-02-06 10:20:02.257501584 +0100
++++ new/src/plugins/ipmi_intf.c	2017-02-06 10:42:12.585257810 +0100
+@@ -55,6 +55,7 @@
+ #include <ipmitool/ipmi.h>
+ #include <ipmitool/ipmi_sdr.h>
+ #include <ipmitool/log.h>
++#include <ipmitool/helper.h>
  
--/* ipmi_parse_hex - convert hexadecimal numbers to ascii string
-- *                  Input string must be composed of two-characer hexadecimal numbers.
-- *                  There is no separator between the numbers. Each number results in one character
-- *                  of the converted string.
-- *
-- *                  Example: ipmi_parse_hex("50415353574F5244") returns 'PASSWORD'
-- *
-- * @param str:  input string. It must contain only even number of '0'-'9','a'-'f' and 'A-F' characters.
-- * @returns converted ascii string
-- * @returns NULL on error
-- */
--static unsigned char *
--ipmi_parse_hex(const char *str)
--{
--	const char * p;
--	unsigned char * out, *q;
--	unsigned char b = 0;
--	int shift = 4;
--
--	if (strlen(str) == 0)
--		return NULL;
--
--	if (strlen(str) % 2 != 0) {
--		lprintf(LOG_ERR, "Number of hex_kg characters is not even");
--		return NULL;
--	}
--
--	if (strlen(str) > (IPMI_KG_BUFFER_SIZE-1)*2) {
--		lprintf(LOG_ERR, "Kg key is too long");
--		return NULL;
--	}
--
--	out = calloc(IPMI_KG_BUFFER_SIZE, sizeof(unsigned char));
--	if (out == NULL) {
--		lprintf(LOG_ERR, "malloc failure");
--		return NULL;
--	}
--
--	for (p = str, q = out; *p; p++) {
--		if (!isxdigit(*p)) {
--			lprintf(LOG_ERR, "Kg_hex is not hexadecimal number");
--			free(out);
--			out = NULL;
--			return NULL;
--		}
--
--		if (*p < 'A') /* it must be 0-9 */
--			b = *p - '0';
--		else /* it's A-F or a-f */
--			b = (*p | 0x20) - 'a' + 10; /* convert to lowercase and to 10-15 */
--
--		*q = *q + b << shift;
--		if (shift)
--			shift = 0;
--		else {
--			shift = 4;
--			q++;
--		}
--	}
--
--	return out;
--}
--
- /* ipmi_parse_options  -  helper function to handle parsing command line options
-  *
-  * @argc:	count of options
--- 
-2.1.0
-
+ #define IPMI_DEFAULT_PAYLOAD_SIZE   25
+ 

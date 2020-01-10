@@ -29,6 +29,8 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _XOPEN_SOURCE 700
+#define _BSD_SOURCE
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -69,7 +71,7 @@
 # else
 #  include "plugins/open/open.h"
 # endif
-#  include <sys/poll.h>
+#  include <poll.h>
 #endif /* IPMI_INTF_OPEN */
 
 #include <ipmitool/helper.h>
@@ -122,13 +124,13 @@ static int openipmi_setup(struct ipmi_event_intf * eintf);
 static int openipmi_wait(struct ipmi_event_intf * eintf);
 static int openipmi_read(struct ipmi_event_intf * eintf);
 static struct ipmi_event_intf openipmi_event_intf = {
-	name:	"open",
-	desc:	"OpenIPMI asyncronous notification of events",
-	prefix: "",
-	setup:	openipmi_setup,
-	wait:	openipmi_wait,
-	read:	openipmi_read,
-	log:	log_event,
+	.name = "open",
+	.desc = "OpenIPMI asyncronous notification of events",
+	.prefix = "",
+	.setup = openipmi_setup,
+	.wait = openipmi_wait,
+	.read = openipmi_read,
+	.log = log_event,
 };
 #endif
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -139,13 +141,13 @@ static int selwatch_wait(struct ipmi_event_intf * eintf);
 static int selwatch_read(struct ipmi_event_intf * eintf);
 static int selwatch_check(struct ipmi_event_intf * eintf);
 static struct ipmi_event_intf selwatch_event_intf = {
-	name:	"sel",
-	desc:	"Poll SEL for notification of events",
-	setup:	selwatch_setup,
-	wait:	selwatch_wait,
-	read:	selwatch_read,
-	check:	selwatch_check,
-	log:	log_event,
+	.name = "sel",
+	.desc = "Poll SEL for notification of events",
+	.setup = selwatch_setup,
+	.wait = selwatch_wait,
+	.read = selwatch_read,
+	.check = selwatch_check,
+	.log = log_event,
 };
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
@@ -237,8 +239,7 @@ log_event(struct ipmi_event_intf * eintf, struct sel_event_record * evt)
 		return;
 	}
 
-	type = ipmi_sel_get_sensor_type_offset(evt->sel_type.standard_type.sensor_type,
-					       evt->sel_type.standard_type.event_data[0]);
+	type = ipmi_get_sensor_type(intf, evt->sel_type.standard_type.sensor_type);
 
 	ipmi_get_event_desc(intf, evt, &desc);
 
@@ -283,7 +284,7 @@ log_event(struct ipmi_event_intf * eintf, struct sel_event_record * evt)
 				eintf->prefix,
 				type,
 				sdr->record.full->id_string,
-				desc ? : "",
+				desc ? desc : "",
 				(evt->sel_type.standard_type.event_dir
 				 ? "Deasserted" : "Asserted"),
 				(trigger_reading==(int)trigger_reading) ? 0 : 2,
@@ -303,7 +304,7 @@ log_event(struct ipmi_event_intf * eintf, struct sel_event_record * evt)
 			 */
 			lprintf(LOG_NOTICE, "%s%s sensor %s %s %s",
 				eintf->prefix, type,
-				sdr->record.full->id_string, desc ? : "",
+				sdr->record.full->id_string, desc ? desc : "",
 				(evt->sel_type.standard_type.event_dir
 				 ? "Deasserted" : "Asserted"));
 			if (((evt->sel_type.standard_type.event_data[0] >> 6) & 3) == 1) {
@@ -316,7 +317,7 @@ log_event(struct ipmi_event_intf * eintf, struct sel_event_record * evt)
 			 */
 			lprintf(LOG_NOTICE, "%s%s sensor %s %s %s",
 				eintf->prefix, type,
-				sdr->record.full->id_string, desc ? : "",
+				sdr->record.full->id_string, desc ? desc : "",
 				(evt->sel_type.standard_type.event_dir
 				 ? "Deasserted" : "Asserted"));
 		}
@@ -325,15 +326,15 @@ log_event(struct ipmi_event_intf * eintf, struct sel_event_record * evt)
 	case SDR_RECORD_TYPE_COMPACT_SENSOR:
 		lprintf(LOG_NOTICE, "%s%s sensor %s - %s %s",
 			eintf->prefix, type,
-			sdr->record.compact->id_string, desc ? : "",
+			sdr->record.compact->id_string, desc ? desc : "",
 			(evt->sel_type.standard_type.event_dir
 			 ? "Deasserted" : "Asserted"));
 		break;
 
 	default:
-		lprintf(LOG_NOTICE, "%s%s sensor - %s",
+		lprintf(LOG_NOTICE, "%s%s sensor (0x%02x) - %s",
 			eintf->prefix, type,
-			evt->sel_type.standard_type.sensor_num, desc ? : "");
+			evt->sel_type.standard_type.sensor_num, desc ? desc : "");
 		break;
 	}
 
@@ -703,7 +704,6 @@ ipmievd_main(struct ipmi_event_intf * eintf, int argc, char ** argv)
 
 	memset(pidfile, 0, 64);
 	sprintf(pidfile, "%s%d", DEFAULT_PIDFILE, eintf->intf->devnum);
-	lprintf(LOG_NOTICE, "ipmievd: using pidfile %s", pidfile);
 
 	for (i = 0; i < argc; i++) {
 		if (strncasecmp(argv[i], "help", 4) == 0) {
@@ -737,6 +737,8 @@ ipmievd_main(struct ipmi_event_intf * eintf, int argc, char ** argv)
 				__min(strlen((const char *)(argv[i]+8)), 63));
 		}
 	}
+
+	lprintf(LOG_DEBUG, "ipmievd: using pidfile %s", pidfile);
 
 	/*
 	 * We need to open interface before forking daemon
@@ -831,8 +833,8 @@ ipmievd_sel_main(struct ipmi_intf * intf, int argc, char ** argv)
 
 	if (intf->session != NULL) {
 		snprintf(eintf->prefix,
-			 strlen((const char *)intf->session->hostname) + 3,
-			 "%s: ", intf->session->hostname);
+			 strlen((const char *)intf->ssn_params.hostname) + 3,
+			 "%s: ", intf->ssn_params.hostname);
 	}
 
 	return ipmievd_main(eintf, argc, argv);

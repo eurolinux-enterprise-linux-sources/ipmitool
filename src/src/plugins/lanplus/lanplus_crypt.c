@@ -74,7 +74,7 @@ lanplus_rakp2_hmac_matches(const struct ipmi_session * session,
 {
 	uint8_t       * buffer;
 	int           bufferLength, i;
-	uint8_t       mac[20];
+	uint8_t       mac[IPMI_MAX_MD_SIZE];
 	uint32_t      macLength;
 
 	uint32_t SIDm_lsbf, SIDc_lsbf;
@@ -84,7 +84,12 @@ lanplus_rakp2_hmac_matches(const struct ipmi_session * session,
 		return 1;
 	
 	/* We don't yet support other algorithms */
-	assert(session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA1);
+	assert((session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA1)
+		|| (session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_MD5)
+#ifdef HAVE_CRYPTO_SHA256
+		|| (session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA256)
+#endif /* HAVE_CRYPTO_SHA256 */
+	);
 	
 
 	bufferLength =
@@ -95,7 +100,7 @@ lanplus_rakp2_hmac_matches(const struct ipmi_session * session,
 		16 +                       /* GUIDc    */
 		1  +                       /* ROLEm    */
 		1  +                       /* ULENGTHm */
-		strlen((const char *)session->username); /* optional */
+		strlen((const char *)intf->ssn_params.username); /* optional */
 
 	buffer = malloc(bufferLength);
 	if (buffer == NULL) {
@@ -163,11 +168,11 @@ lanplus_rakp2_hmac_matches(const struct ipmi_session * session,
 	}
 
 	/* ULENGTHm */
-	buffer[57] = strlen((const char *)session->username);
+	buffer[57] = strlen((const char *)intf->ssn_params.username);
 
 	/* UserName [optional] */
 	for (i = 0; i < buffer[57]; ++i)
-		buffer[58 + i] = session->username[i];
+		buffer[58 + i] = intf->ssn_params.username[i];
 
 	if (verbose > 2)
 	{
@@ -228,8 +233,9 @@ lanplus_rakp4_hmac_matches(const struct ipmi_session * session,
 {
 	uint8_t       * buffer;
 	int           bufferLength, i;
-	uint8_t       mac[20];
+	uint8_t       mac[IPMI_MAX_MD_SIZE];
 	uint32_t      macLength;
+	uint32_t      cmpLength;
 	uint32_t      SIDc_lsbf;
 
 	if (ipmi_oem_active(intf, "intelplus")){
@@ -238,13 +244,19 @@ lanplus_rakp4_hmac_matches(const struct ipmi_session * session,
 			return 1;
 
 		/* We don't yet support other algorithms */
-		assert(session->v2_data.integrity_alg == IPMI_INTEGRITY_HMAC_SHA1_96);
+		assert((session->v2_data.integrity_alg == IPMI_INTEGRITY_HMAC_SHA1_96)
+			|| (session->v2_data.integrity_alg == IPMI_INTEGRITY_HMAC_MD5_128));
 	} else {
 		if (session->v2_data.auth_alg == IPMI_AUTH_RAKP_NONE)
 			return 1;
 
 		/* We don't yet support other algorithms */
-		assert(session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA1);
+		assert((session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA1)
+			|| (session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_MD5)
+#ifdef HAVE_CRYPTO_SHA256
+			|| (session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA256)
+#endif /* HAVE_CRYPTO_SHA256 */
+		);
 	}
 
 	bufferLength =
@@ -294,7 +306,8 @@ lanplus_rakp4_hmac_matches(const struct ipmi_session * session,
 	if (verbose > 2)
 	{
 		printbuf((const uint8_t *)buffer, bufferLength, ">> rakp4 mac input buffer");
-		printbuf(session->v2_data.sik, 20l, ">> rakp4 mac key (sik)");
+		printbuf(session->v2_data.sik, session->v2_data.sik_len,
+				">> rakp4 mac key (sik)");
 	}
 
 
@@ -305,7 +318,7 @@ lanplus_rakp4_hmac_matches(const struct ipmi_session * session,
 	             ? session->v2_data.integrity_alg 
 	             : session->v2_data.auth_alg ,
 				 session->v2_data.sik,
-				 IPMI_SIK_BUFFER_SIZE,
+				 session->v2_data.sik_len,
 				 buffer,
 				 bufferLength,
 				 mac,
@@ -317,12 +330,48 @@ lanplus_rakp4_hmac_matches(const struct ipmi_session * session,
 		printbuf(mac,     macLength, ">> rakp4 mac as computed by the remote console");
 	}
 
-
+	if (ipmi_oem_active(intf, "intelplus")) {
+		/* Intel BMC responds with the integrity Algorithm in RAKP4 */
+		switch(session->v2_data.integrity_alg) {
+			case IPMI_INTEGRITY_HMAC_SHA1_96:
+				assert(macLength == IPMI_SHA_DIGEST_LENGTH);
+				cmpLength = IPMI_SHA1_AUTHCODE_SIZE;
+				break;
+			case IPMI_INTEGRITY_HMAC_MD5_128:
+				assert(macLength == IPMI_MD5_DIGEST_LENGTH);
+				cmpLength = IPMI_HMAC_MD5_AUTHCODE_SIZE;
+				break;
+			default:
+				assert(0);
+				break;
+		}
+	} else {
+		/* We don't yet support other algorithms */
+		switch(session->v2_data.auth_alg) {
+			case IPMI_AUTH_RAKP_HMAC_SHA1:
+				assert(macLength == IPMI_SHA_DIGEST_LENGTH);
+				cmpLength = IPMI_SHA1_AUTHCODE_SIZE;
+				break;
+			case IPMI_AUTH_RAKP_HMAC_MD5:
+				assert(macLength == IPMI_MD5_DIGEST_LENGTH);
+				cmpLength = IPMI_HMAC_MD5_AUTHCODE_SIZE;
+				break;
+#ifdef HAVE_CRYPTO_SHA256
+			case IPMI_AUTH_RAKP_HMAC_SHA256:
+				assert(macLength == IPMI_SHA256_DIGEST_LENGTH);
+				cmpLength = IPMI_HMAC_SHA256_AUTHCODE_SIZE;
+				break;
+#endif /* HAVE_CRYPTO_SHA256 */
+			default:
+				assert(0);
+				break;
+		}
+	}
 
 	free(buffer);
 	buffer = NULL;
-	assert(macLength == 20);
-	return (memcmp(bmc_mac, mac, 12) == 0);
+	assert(macLength >= cmpLength);
+	return (memcmp(bmc_mac, mac, cmpLength) == 0);
 }
 
 
@@ -368,14 +417,19 @@ lanplus_generate_rakp3_authcode(uint8_t * output_buffer,
 	}
 
 	/* We don't yet support other algorithms */
-	assert(session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA1);
+	assert((session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA1)
+		|| (session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_MD5)
+#ifdef HAVE_CRYPTO_SHA256
+		|| (session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA256)
+#endif /* HAVE_CRYPTO_SHA256 */
+	);
 
 	input_buffer_length =
 		16 + /* Rc       */
 		4  + /* SIDm     */
 		1  + /* ROLEm    */
 		1  + /* ULENGTHm */
-		strlen((const char *)session->username);
+		strlen((const char *)intf->ssn_params.username);
 
 	input_buffer = malloc(input_buffer_length);
 	if (input_buffer == NULL) {
@@ -406,16 +460,16 @@ lanplus_generate_rakp3_authcode(uint8_t * output_buffer,
 	
 	/* ROLEm */
 	if (ipmi_oem_active(intf, "intelplus") || ipmi_oem_active(intf, "i82571spt"))
-		input_buffer[20] = session->privlvl;
+		input_buffer[20] = intf->ssn_params.privlvl;
 	else 
 		input_buffer[20] = session->v2_data.requested_role;
 
 	/* ULENGTHm */
-	input_buffer[21] = strlen((const char *)session->username);
+	input_buffer[21] = strlen((const char *)intf->ssn_params.username);
 
 	/* USERNAME */
 	for (i = 0; i < input_buffer[21]; ++i)
-		input_buffer[22 + i] = session->username[i];
+		input_buffer[22 + i] = intf->ssn_params.username[i];
 
 	if (verbose > 2)
 	{
@@ -478,20 +532,26 @@ lanplus_generate_sik(struct ipmi_session * session, struct ipmi_intf * intf)
 	uint32_t mac_length;
 	
 
-	memset(session->v2_data.sik, 0, IPMI_SIK_BUFFER_SIZE);
+	memset(session->v2_data.sik, 0, sizeof(session->v2_data.sik));
+	session->v2_data.sik_len = 0;
 
 	if (session->v2_data.auth_alg == IPMI_AUTH_RAKP_NONE)
 		return 0;
 
 	/* We don't yet support other algorithms */
-	assert(session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA1);
+	assert((session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA1)
+		|| (session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_MD5)
+#ifdef HAVE_CRYPTO_SHA256
+		|| (session->v2_data.auth_alg == IPMI_AUTH_RAKP_HMAC_SHA256)
+#endif /* HAVE_CRYPTO_SHA256 */
+	);
 
 	input_buffer_length =
 		16 +  /* Rm       */
 		16 +  /* Rc       */
 		1  +  /* ROLEm     */
 		1  +  /* ULENGTHm  */
-		strlen((const char *)session->username);
+		strlen((const char *)intf->ssn_params.username);
 
 	input_buffer = malloc(input_buffer_length);
 	if (input_buffer == NULL) {
@@ -536,13 +596,13 @@ lanplus_generate_sik(struct ipmi_session * session, struct ipmi_intf * intf)
 	}
 
 	/* ULENGTHm */
-	input_buffer[33] = strlen((const char *)session->username);
+	input_buffer[33] = strlen((const char *)intf->ssn_params.username);
 
 	/* USERNAME */
 	for (i = 0; i < input_buffer[33]; ++i)
-		input_buffer[34 + i] = session->username[i];
+		input_buffer[34 + i] = intf->ssn_params.username[i];
 
-	if (session->v2_data.kg[0])
+	if (intf->ssn_params.kg[0])
 	{
 		/* We will be hashing with Kg */
 		/*
@@ -550,7 +610,7 @@ lanplus_generate_sik(struct ipmi_session * session, struct ipmi_intf * intf)
 		 * using Kg.  It specifies that Kg should not be truncated.
 		 * Kg is set in ipmi_intf.
 		 */
-		input_key        = session->v2_data.kg;
+		input_key        = intf->ssn_params.kg;
 	}
 	else
 	{
@@ -572,15 +632,33 @@ lanplus_generate_sik(struct ipmi_session * session, struct ipmi_intf * intf)
 
 	free(input_buffer);
 	input_buffer = NULL;
-	assert(mac_length == 20);
+	switch (session->v2_data.auth_alg) {
+		case IPMI_AUTH_RAKP_HMAC_SHA1:
+			assert(mac_length == IPMI_SHA_DIGEST_LENGTH);
+			break;
+		case IPMI_AUTH_RAKP_HMAC_MD5:
+			assert(mac_length == IPMI_MD5_DIGEST_LENGTH);
+			break;
+#ifdef HAVE_CRYPTO_SHA256
+		case IPMI_AUTH_RAKP_HMAC_SHA256:
+			assert(mac_length == IPMI_SHA256_DIGEST_LENGTH);
+			break;
+#endif /* HAVE_CRYPTO_SHA256 */
+		default:
+			assert(0);
+			break;
+	}
+
+	session->v2_data.sik_len = mac_length;
 
 	/*
 	 * The key MAC generated is 20 bytes, but we will only be using the first
 	 * 12 for SHA1 96
 	 */
-	if (verbose >= 2)
-		printbuf(session->v2_data.sik, 20, "Generated session integrity key");
-
+	if (verbose >= 2) {
+		printbuf(session->v2_data.sik, session->v2_data.sik_len,
+				"Generated session integrity key");
+	}
 	return 0;
 }
 
@@ -614,16 +692,32 @@ lanplus_generate_k1(struct ipmi_session * session)
 	{
 		lanplus_HMAC(session->v2_data.auth_alg,
 					 session->v2_data.sik,
-					 IPMI_SIK_BUFFER_SIZE, /* SIK length */
+					 session->v2_data.sik_len, /* SIK length */
 					 CONST_1,
 					 20,
 					 session->v2_data.k1,
 					 &mac_length);
-		assert(mac_length == 20);
+		switch (session->v2_data.auth_alg) {
+			case IPMI_AUTH_RAKP_HMAC_SHA1:
+				assert(mac_length == IPMI_SHA_DIGEST_LENGTH);
+				break;
+			case IPMI_AUTH_RAKP_HMAC_MD5:
+				assert(mac_length == IPMI_MD5_DIGEST_LENGTH);
+				break;
+#ifdef HAVE_CRYPTO_SHA256
+			case IPMI_AUTH_RAKP_HMAC_SHA256:
+				assert(mac_length == IPMI_SHA256_DIGEST_LENGTH);
+				break;
+#endif /* HAVE_CRYPTO_SHA256 */
+			default:
+				assert(0);
+				break;
+		}
+		session->v2_data.k1_len = mac_length;
 	}
 
 	if (verbose >= 2)
-		printbuf(session->v2_data.k1, 20, "Generated K1");
+		printbuf(session->v2_data.k1, session->v2_data.k1_len, "Generated K1");
 
 	return 0;
 }
@@ -658,16 +752,32 @@ lanplus_generate_k2(struct ipmi_session * session)
 	{
 		lanplus_HMAC(session->v2_data.auth_alg,
 					 session->v2_data.sik,
-					 IPMI_SIK_BUFFER_SIZE, /* SIK length */
+					 session->v2_data.sik_len, /* SIK length */
 					 CONST_2,
 					 20,
 					 session->v2_data.k2,
 					 &mac_length);
-		assert(mac_length == 20);
+		switch (session->v2_data.auth_alg) {
+			case IPMI_AUTH_RAKP_HMAC_SHA1:
+				assert(mac_length == IPMI_SHA_DIGEST_LENGTH);
+				break;
+			case IPMI_AUTH_RAKP_HMAC_MD5:
+				assert(mac_length == IPMI_MD5_DIGEST_LENGTH);
+				break;
+#ifdef HAVE_CRYPTO_SHA256
+			case IPMI_AUTH_RAKP_HMAC_SHA256:
+				assert(mac_length == IPMI_SHA256_DIGEST_LENGTH);
+				break;
+#endif /* HAVE_CRYPTO_SHA256 */
+			default:
+				assert(0);
+				break;
+		}
+		session->v2_data.k2_len = mac_length;
 	}
 
 	if (verbose >= 2)
-		printbuf(session->v2_data.k2, 20, "Generated K2");
+		printbuf(session->v2_data.k2, session->v2_data.k2_len, "Generated K2");
 
 	return 0;
 }
@@ -803,6 +913,7 @@ lanplus_has_valid_auth_code(struct ipmi_rs * rs, struct ipmi_session * session)
 	uint8_t * bmc_authcode;
 	uint8_t generated_authcode[IPMI_MAX_MAC_SIZE];
 	uint32_t generated_authcode_length;
+	uint32_t authcode_length;
 	
 
 	if ((rs->session.authtype != IPMI_SESSION_AUTHTYPE_RMCP_PLUS) ||
@@ -811,36 +922,51 @@ lanplus_has_valid_auth_code(struct ipmi_rs * rs, struct ipmi_session * session)
 		(session->v2_data.integrity_alg == IPMI_INTEGRITY_NONE))
 		return 1;
 	
-	/* We only support SHA1-96 now */
-	assert(session->v2_data.integrity_alg == IPMI_INTEGRITY_HMAC_SHA1_96);
+	switch (session->v2_data.integrity_alg) {
+		case IPMI_INTEGRITY_HMAC_SHA1_96:
+			authcode_length = IPMI_SHA1_AUTHCODE_SIZE;
+			break;
+		case IPMI_INTEGRITY_HMAC_MD5_128:
+			authcode_length = IPMI_HMAC_MD5_AUTHCODE_SIZE;
+			break;
+#ifdef HAVE_CRYPTO_SHA256
+		case IPMI_INTEGRITY_HMAC_SHA256_128:
+			authcode_length = IPMI_HMAC_SHA256_AUTHCODE_SIZE;
+			break;
+#endif /* HAVE_CRYPTO_SHA256 */
+		/* Unsupported */
+		default:
+			assert(0);
+			break;
+	}
 
 	/*
 	 * For SHA1-96, the authcode will be the last 12 bytes in the packet
+	 * For SHA256-128 or MD5-128, the authcode will be the last 16 bytes in the packet
 	 */
-	bmc_authcode = rs->data + (rs->data_len - IPMI_SHA1_AUTHCODE_SIZE);
+	bmc_authcode = rs->data + (rs->data_len - authcode_length);
 
 	lanplus_HMAC(session->v2_data.integrity_alg,
 				 session->v2_data.k1,
-				 IPMI_AUTHCODE_BUFFER_SIZE,
+				 session->v2_data.k1_len,
 				 rs->data + IPMI_LANPLUS_OFFSET_AUTHTYPE,
-				 rs->data_len - IPMI_LANPLUS_OFFSET_AUTHTYPE - IPMI_SHA1_AUTHCODE_SIZE,
+				 rs->data_len - IPMI_LANPLUS_OFFSET_AUTHTYPE - authcode_length,
 				 generated_authcode,
 				 &generated_authcode_length);
 
 	if (verbose > 3)
 	{
 		lprintf(LOG_DEBUG+2, "Validating authcode");
-		printbuf(session->v2_data.k1, 20, "K1");
+		printbuf(session->v2_data.k1, session->v2_data.k1_len, "K1");
 		printbuf(rs->data + IPMI_LANPLUS_OFFSET_AUTHTYPE,
-				 rs->data_len - IPMI_LANPLUS_OFFSET_AUTHTYPE - IPMI_SHA1_AUTHCODE_SIZE,
+				 rs->data_len - IPMI_LANPLUS_OFFSET_AUTHTYPE - authcode_length,
 				 "Authcode Input Data");
-		printbuf(generated_authcode, 12, "Generated authcode");
-		printbuf(bmc_authcode,       12, "Expected authcode");
+		printbuf(generated_authcode, generated_authcode_length, "Generated authcode");
+		printbuf(bmc_authcode,       authcode_length, "Expected authcode");
 	}
 
-	
-	assert(generated_authcode_length == 20);
-	return (memcmp(bmc_authcode, generated_authcode, 12) == 0);
+	assert(generated_authcode_length >= authcode_length);
+	return (memcmp(bmc_authcode, generated_authcode, authcode_length) == 0);
 }
 
 

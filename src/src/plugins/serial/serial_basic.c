@@ -29,9 +29,13 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF PPS HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _GNU_SOURCE 1
 
 /* Serial Interface, Basic Mode plugin. */
 
+#if defined HAVE_ALLOCA_H
+#include <alloca.h>
+#endif
 #include <stdio.h>
 #include <fcntl.h>
 #include <time.h>
@@ -43,7 +47,7 @@
 #include <ctype.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <termios.h>
 
 #include <ipmitool/ipmi.h>
@@ -77,7 +81,7 @@ struct ipmb_msg_hdr {
 	unsigned char rqSA;
 	unsigned char rqSeq;	/* RQ SEQ | RQ LUN */
 	unsigned char cmd;
-	unsigned char data[0];
+	unsigned char data[];
 };
 
 /*
@@ -99,7 +103,7 @@ struct ipmi_get_message_rp {
 	unsigned char rsSA;
 	unsigned char rqSeq;
 	unsigned char cmd;
-	unsigned char data[0];
+	unsigned char data[];
 };
 
 /*
@@ -126,7 +130,7 @@ struct  serial_bm_parse_ctx{
  *	Receiving context
  */
 struct serial_bm_recv_ctx {
-	char buffer[SERIAL_BM_MAX_BUFFER_SIZE];
+	uint8_t buffer[SERIAL_BM_MAX_BUFFER_SIZE];
 	size_t buffer_size;
 	size_t max_buffer_size;
 };
@@ -183,16 +187,10 @@ static int is_system;
 static int
 serial_bm_setup(struct ipmi_intf * intf)
 {
-	intf->session = malloc(sizeof(struct ipmi_session));
-	if (intf->session == NULL) {
-		lprintf(LOG_ERR, "ipmitool: malloc failure");
-		return -1;
-	}
-	memset(intf->session, 0, sizeof(struct ipmi_session));
-
 	/* setup default LAN maximum request and response sizes */
 	intf->max_request_data_size = SERIAL_BM_MAX_RQ_SIZE;
 	intf->max_response_data_size = SERIAL_BM_MAX_RS_SIZE;
+
 	return 0;
 }
 
@@ -285,10 +283,10 @@ serial_bm_open(struct ipmi_intf * intf)
 	/* set the new options for the port with flushing */
 	tcsetattr(intf->fd, TCSAFLUSH, &ti);
 
-	if (intf->session->timeout == 0)
-		intf->session->timeout = SERIAL_BM_TIMEOUT;
-	if (intf->session->retry == 0)
-		intf->session->retry = SERIAL_BM_RETRY_COUNT;
+	if (intf->ssn_params.timeout == 0)
+		intf->ssn_params.timeout = SERIAL_BM_TIMEOUT;
+	if (intf->ssn_params.retry == 0)
+		intf->ssn_params.retry = SERIAL_BM_RETRY_COUNT;
 
 	intf->opened = 1;
 
@@ -459,7 +457,7 @@ serial_bm_wait_for_data(struct ipmi_intf * intf)
 	pfd.events = POLLIN;
 	pfd.revents = 0;
 
-	n = poll(&pfd, 1, intf->session->timeout*1000);
+	n = poll(&pfd, 1, intf->ssn_params.timeout * 1000);
 	if (n < 0) {
 		lperror(LOG_ERR, "Poll for serial data failed");
 		return -1;
@@ -887,7 +885,7 @@ serial_bm_get_message(struct ipmi_intf * intf,
 		tm = clock() - start;
 
 		tm /= CLOCKS_PER_SEC;
-	} while (tm < intf->session->timeout);
+	} while (tm < intf->ssn_params.timeout);
 
 	return 0;
 }
@@ -910,7 +908,7 @@ serial_bm_send_request(struct ipmi_intf * intf, struct ipmi_rq * req)
 	read_ctx.max_buffer_size = SERIAL_BM_MAX_BUFFER_SIZE;
 
 	/* Send the message and receive the answer */
-	for (retry = 0; retry < intf->session->retry; retry++) {
+	for (retry = 0; retry < intf->ssn_params.retry; retry++) {
 		/* build output message */
 		bridging_level = serial_bm_build_msg(intf, req, msg,
 				sizeof (msg), req_ctx, &msg_len);
@@ -956,7 +954,7 @@ serial_bm_send_request(struct ipmi_intf * intf, struct ipmi_rq * req)
 			/* check if response for inner request is not encapsulated */
 			} else if (rv == 1) {
 				/* wait for response for inner request */
-				rv = serial_bm_wait_response(intf, &req_ctx[0],
+				rv = serial_bm_wait_response(intf, &req_ctx[1],
 						&read_ctx, msg, sizeof (msg));
 
 				/* check for IO error */
@@ -1003,22 +1001,14 @@ serial_bm_send_request(struct ipmi_intf * intf, struct ipmi_rq * req)
 	return NULL;
 }
 
-int
-serial_bm_set_my_addr(struct ipmi_intf * intf, uint8_t addr)
-{
-	intf->my_addr = addr;
-	return 0;
-}
-
 /*
  *	Serial BM interface
  */
 struct ipmi_intf ipmi_serial_bm_intf = {
-	name:		"serial-basic",
-	desc:		"Serial Interface, Basic Mode",
-	setup:		serial_bm_setup,
-	open:		serial_bm_open,
-	close:		serial_bm_close,
-	sendrecv:	serial_bm_send_request,
-	set_my_addr:serial_bm_set_my_addr
+	.name = "serial-basic",
+	.desc = "Serial Interface, Basic Mode",
+	.setup = serial_bm_setup,
+	.open = serial_bm_open,
+	.close = serial_bm_close,
+	.sendrecv = serial_bm_send_request,
 };

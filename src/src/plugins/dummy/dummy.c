@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -117,7 +118,7 @@ data_write(int fd, void *data_ptr, int data_len)
 		/* TODO - add poll() */
 		data_written = write(fd, data_ptr, data_len);
 		errno_save = errno;
-		if (data_read > 0) {
+		if (data_written > 0) {
 			data_total+= data_written;
 		}
 		if (errno_save != 0) {
@@ -149,9 +150,6 @@ static void
 ipmi_dummyipmi_close(struct ipmi_intf *intf)
 {
 	struct dummy_rq req;
-	int data_total = 0;
-	int data_written = 0;
-	int try = 0;
 	if (intf->fd < 0) {
 		return;
 	}
@@ -178,6 +176,14 @@ ipmi_dummyipmi_open(struct ipmi_intf *intf)
 	struct sockaddr_un address;
 	int len;
 	int rc;
+	char *dummy_sock_path;
+
+	dummy_sock_path = getenv("IPMI_DUMMY_SOCK");
+	if (dummy_sock_path == NULL) {
+		lprintf(LOG_DEBUG, "No IPMI_DUMMY_SOCK set. Dummy mode ON.");
+		intf->opened = 1;
+		return intf->fd;
+	}
 
 	if (intf->opened == 1) {
 		return intf->fd;
@@ -188,7 +194,7 @@ ipmi_dummyipmi_open(struct ipmi_intf *intf)
 		return (-1);
 	}
 	address.sun_family = AF_UNIX;
-	strcpy(address.sun_path, DUMMY_SOCKET_PATH);
+	strcpy(address.sun_path, dummy_sock_path);
 	len = sizeof(address);
 	rc = connect(intf->fd, (struct sockaddr *)&address, len);
 	if (rc != 0) {
@@ -212,6 +218,12 @@ ipmi_dummyipmi_send_cmd(struct ipmi_intf *intf, struct ipmi_rq *req)
 	static struct ipmi_rs rsp;
 	struct dummy_rq req_dummy;
 	struct dummy_rs rsp_dummy;
+	char *dummy_sock_path;
+	dummy_sock_path = getenv("IPMI_DUMMY_SOCK");
+	if (dummy_sock_path == NULL) {
+		lprintf(LOG_DEBUG, "No IPMI_DUMMY_SOCK set. Dummy mode ON.");
+		return NULL;
+	}
 	if (intf == NULL || intf->fd < 0 || intf->opened != 1) {
 		lprintf(LOG_ERR, "dummy failed on intf check.");
 		return NULL;
@@ -245,7 +257,7 @@ ipmi_dummyipmi_send_cmd(struct ipmi_intf *intf, struct ipmi_rq *req)
 			return NULL;
 		}
 	}
-	
+
 	memset(&rsp_dummy, 0, sizeof(rsp_dummy));
 	if (data_read(intf->fd, &rsp_dummy, sizeof(struct dummy_rs)) != 0) {
 		return NULL;
@@ -276,11 +288,11 @@ ipmi_dummyipmi_send_cmd(struct ipmi_intf *intf, struct ipmi_rq *req)
 }
 
 struct ipmi_intf ipmi_dummy_intf = {
-	name:	"dummy",
-	desc:	"Linux DummyIPMI Interface",
-	open:	ipmi_dummyipmi_open,
-	close:	ipmi_dummyipmi_close,
-	sendrecv:	ipmi_dummyipmi_send_cmd,
-	my_addr:	IPMI_BMC_SLAVE_ADDR,
-	target_addr:	IPMI_BMC_SLAVE_ADDR,
+	.name = "dummy",
+	.desc = "Linux DummyIPMI Interface",
+	.open = ipmi_dummyipmi_open,
+	.close = ipmi_dummyipmi_close,
+	.sendrecv = ipmi_dummyipmi_send_cmd,
+	.my_addr = IPMI_BMC_SLAVE_ADDR,
+	.target_addr = IPMI_BMC_SLAVE_ADDR,
 };

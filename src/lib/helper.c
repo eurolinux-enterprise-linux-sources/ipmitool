@@ -29,6 +29,12 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _POSIX_SOURCE
+#define /* glibc 2.19 and earlier */ _BSD_SOURCE || \
+	/* Since glibc 2.20 */_DEFAULT_SOURCE || \
+	_XOPEN_SOURCE >= 500 || \
+	_XOPEN_SOURCE && _XOPEN_SOURCE_EXTENDED || \
+	/* Since glibc 2.10: */ _POSIX_C_SOURCE >= 200112L \
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -45,6 +51,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <assert.h>
+#include <ctype.h>
 
 #if HAVE_CONFIG_H
 # include <config.h>
@@ -73,22 +80,139 @@ uint16_t buf2short(uint8_t * buf)
 	return (uint16_t)(buf[1] << 8 | buf[0]);
 }
 
-const char * buf2str(uint8_t * buf, int len)
+/* buf2str_extended - convert sequence of bytes to hexadecimal string with
+ * optional separator
+ *
+ * @param buf - data to convert
+ * @param len - size of data
+ * @param sep - optional separator (can be NULL)
+ *
+ * @returns     buf representation in hex, possibly truncated to fit
+ *              allocated static memory
+ */
+const char *
+buf2str_extended(const uint8_t *buf, int len, const char *sep)
 {
-	static char str[2049];
+	static char str[BUF2STR_MAXIMUM_OUTPUT_SIZE];
+	char *cur;
 	int i;
+	int sz;
+	int left;
+	int sep_len;
 
-	if (len <= 0 || len > 1024)
-		return NULL;
-
-	memset(str, 0, 2049);
-
-	for (i=0; i<len; i++)
-		sprintf(str+i+i, "%2.2x", buf[i]);
-
-	str[len*2] = '\0';
+	if (buf == NULL) {
+		snprintf(str, sizeof(str), "<NULL>");
+		return (const char *)str;
+	}
+	cur = str;
+	left = sizeof(str);
+	if (sep) {
+		sep_len = strlen(sep);
+	} else {
+		sep_len = 0;
+	}
+	for (i = 0; i < len; i++) {
+		/* may return more than 2, depending on locale */
+		sz = snprintf(cur, left, "%2.2x", buf[i]);
+		if (sz >= left) {
+			/* buffer overflow, truncate */
+			break;
+		}
+		cur += sz;
+		left -= sz;
+		/* do not write separator after last byte */
+		if (sep && i != (len - 1)) {
+			if (sep_len >= left) {
+				break;
+			}
+			strncpy(cur, sep, left - sz);
+			cur += sep_len;
+			left -= sep_len;
+		}
+	}
+	*cur = '\0';
 
 	return (const char *)str;
+}
+
+const char *
+buf2str(const uint8_t *buf, int len)
+{
+	return buf2str_extended(buf, len, NULL);
+}
+
+/* ipmi_parse_hex - convert hexadecimal numbers to ascii string
+ *                  Input string must be composed of two-characer
+ *                  hexadecimal numbers.
+ *                  There is no separator between the numbers. Each number
+ *                  results in one byte of the converted string.
+ *
+ *                  Example: ipmi_parse_hex("50415353574F5244")
+ *                  returns 'PASSWORD'
+ *
+ * @param str:  input string. It must contain only even number
+ *              of '0'-'9','a'-'f' and 'A-F' characters.
+ * @param out: pointer to output data
+ * @param size: size of the output buffer
+ * @returns 0 for empty input string
+ *         -1 for string with odd length
+ *         -2 if out is NULL
+ *         -3 if there is non-hexadecimal char in string
+ *         >0 length of resulting binary data even if it is > size
+ */
+int
+ipmi_parse_hex(const char *str, uint8_t *out, int size)
+{
+	const char *p;
+	uint8_t *q;
+	uint8_t d = 0;
+	uint8_t b = 0;
+	int shift = 4;
+	int len;
+
+	len = strlen(str);
+	if (len == 0) {
+		return 0;
+	}
+
+	if (len % 2 != 0) {
+		return -1;
+	}
+
+	len /= 2; /* out bytes */
+	if (out == NULL) {
+		return -2;
+	}
+
+	for (p = str, q = out; *p; p++) {
+		if (!isxdigit(*p)) {
+			return -3;
+		}
+
+		if (*p < 'A') {
+			/* it must be 0-9 */
+			d = *p - '0';
+		} else {
+			/* it's A-F or a-f */
+			/* convert to lowercase and to 10-15 */
+			d = (*p | 0x20) - 'a' + 10;
+		}
+
+		if (q < (out + size)) {
+			/* there is space, store */
+			b += d << shift;
+			if (shift) {
+				shift = 0;
+			} else {
+				shift = 4;
+				*q = b;
+				b = 0;
+				q++;
+			}
+		}
+	}
+
+	return len;
 }
 
 void printbuf(const uint8_t * buf, int len, const char * desc)
@@ -108,6 +232,53 @@ void printbuf(const uint8_t * buf, int len, const char * desc)
 		fprintf(stderr, " %2.2x", buf[i]);
 	}
 	fprintf(stderr, "\n");
+}
+
+/* str2mac - parse-out MAC address from given string and store it
+ * into buffer.
+ *
+ * @arg: string to be parsed.
+ * @buf: buffer of 6 to hold parsed MAC address.
+ *
+ * returns zero on success, (-1) on error and error message is printed-out.
+ */
+int
+str2mac(const char *arg, uint8_t *buf)
+{
+	unsigned int m1 = 0;
+	unsigned int m2 = 0;
+	unsigned int m3 = 0;
+	unsigned int m4 = 0;
+	unsigned int m5 = 0;
+	unsigned int m6 = 0;
+	if (sscanf(arg, "%02x:%02x:%02x:%02x:%02x:%02x",
+		   &m1, &m2, &m3, &m4, &m5, &m6) != 6) {
+		lprintf(LOG_ERR, "Invalid MAC address: %s", arg);
+		return -1;
+	}
+	if (m1 > UINT8_MAX || m2 > UINT8_MAX
+			|| m3 > UINT8_MAX || m4 > UINT8_MAX
+			|| m5 > UINT8_MAX || m6 > UINT8_MAX) {
+		lprintf(LOG_ERR, "Invalid MAC address: %s", arg);
+		return -1;
+	}
+	buf[0] = (uint8_t)m1;
+	buf[1] = (uint8_t)m2;
+	buf[2] = (uint8_t)m3;
+	buf[3] = (uint8_t)m4;
+	buf[4] = (uint8_t)m5;
+	buf[5] = (uint8_t)m6;
+	return 0;
+}
+
+/* mac2str   -- return MAC address as a string
+ *
+ * @buf: buffer of 6 to hold parsed MAC address.
+ */
+const char *
+mac2str(const uint8_t *buf)
+{
+	return buf2str_extended(buf, 6, ":");
 }
 
 const char * val2str(uint16_t val, const struct valstr *vs)
@@ -671,6 +842,43 @@ ipmi_start_daemon(struct ipmi_intf *intf)
 	dup(fd);
 }
 
+/* eval_ccode - evaluate return value of _ipmi_* functions and print error error
+ * message, if conditions are met.
+ *
+ * @ccode - return value of _ipmi_* function.
+ *
+ * returns - 0 if ccode is 0, otherwise (-1) and error might get printed-out.
+ */
+int
+eval_ccode(const int ccode)
+{
+	if (ccode == 0) {
+		return 0;
+	} else if (ccode < 0) {
+		switch (ccode) {
+			case (-1):
+				lprintf(LOG_ERR, "IPMI response is NULL.");
+				break;
+			case (-2):
+				lprintf(LOG_ERR, "Unexpected data length received.");
+				break;
+			case (-3):
+				lprintf(LOG_ERR, "Invalid function parameter.");
+				break;
+			case (-4):
+				lprintf(LOG_ERR, "ipmitool: malloc failure.");
+				break;
+			default:
+				break;
+		}
+		return (-1);
+	} else {
+		lprintf(LOG_ERR, "IPMI command failed: %s",
+				val2str(ccode, completion_code_vals));
+		return (-1);
+	}
+}
+
 /* is_fru_id - wrapper for str-2-int FRU ID conversion. Message is printed
  * on error.
  * FRU ID range: <0..255>
@@ -700,9 +908,9 @@ is_fru_id(const char *argv_ptr, uint8_t *fru_id_ptr)
 /* is_ipmi_channel_num - wrapper for str-2-int Channel conversion. Message is
  * printed on error.
  *
- * 6.3 Channel Numbers, p. 45, IPMIv2 spec.
- * Valid channel numbers are: <0..7>, <E-F>
- * Reserved channel numbers: <8-D>
+ * 6.3 Channel Numbers, p. 49, IPMIv2 spec. rev1.1
+ * Valid channel numbers are: <0x0..0xB>, <0xE-0xF>
+ * Reserved channel numbers: <0xC-0xD>
  *
  * @argv_ptr: source string to convert from; usually argv
  * @channel_ptr: pointer where to store result
@@ -719,14 +927,14 @@ is_ipmi_channel_num(const char *argv_ptr, uint8_t *channel_ptr)
 		return (-1);
 	}
 	if ((str2uchar(argv_ptr, channel_ptr) == 0)
-			&& ((*channel_ptr >= 0x0 && *channel_ptr <= 0x7)
+			&& (*channel_ptr <= 0xB
 				|| (*channel_ptr >= 0xE && *channel_ptr <= 0xF))) {
 		return 0;
 	}
 	lprintf(LOG_ERR,
 			"Given Channel number '%s' is either invalid or out of range.",
 			argv_ptr);
-	lprintf(LOG_ERR, "Channel number must be from ranges: <0..7>, <0xE..0xF>");
+	lprintf(LOG_ERR, "Channel number must be from ranges: <0x0..0xB>, <0xE..0xF>");
 	return (-1);
 }
 
@@ -758,6 +966,36 @@ is_ipmi_user_id(const char *argv_ptr, uint8_t *ipmi_uid_ptr)
 	lprintf(LOG_ERR, "User ID is limited to range <%i..%i>.",
 			IPMI_UID_MIN, IPMI_UID_MAX);
 	return (-1);
+}
+
+/* is_ipmi_user_priv_limit - check whether given value is valid User Privilege
+ * Limit, eg. IPMI v2 spec, 22.27 Get User Access Command.
+ *
+ * @priv_limit: User Privilege Limit
+ *
+ * returns 0 if Priv Limit is valid
+ * returns (-1) when Priv Limit is invalid
+ */
+int
+is_ipmi_user_priv_limit(const char *argv_ptr, uint8_t *ipmi_priv_limit_ptr)
+{
+	if (!argv_ptr || !ipmi_priv_limit_ptr) {
+		lprintf(LOG_ERR,
+				"is_ipmi_user_priv_limit(): invalid argument(s).");
+		return (-1);
+	}
+	if ((str2uchar(argv_ptr, ipmi_priv_limit_ptr) != 0)
+			|| ((*ipmi_priv_limit_ptr < 0x01
+				|| *ipmi_priv_limit_ptr > 0x05)
+				&& *ipmi_priv_limit_ptr != 0x0F)) {
+		lprintf(LOG_ERR,
+				"Given Privilege Limit '%s' is invalid.",
+				argv_ptr);
+		lprintf(LOG_ERR,
+				"Privilege Limit is limited to <0x1..0x5> and <0xF>.");
+		return (-1);
+	}
+	return 0;
 }
 
 uint16_t

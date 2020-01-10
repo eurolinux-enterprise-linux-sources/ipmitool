@@ -30,6 +30,10 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _BSD_SOURCE || \
+	(_XOPEN_SOURCE >= 500 || \
+                       _XOPEN_SOURCE && _XOPEN_SOURCE_EXTENDED) && \
+	!(_POSIX_C_SOURCE >= 200809L || _XOPEN_SOURCE >= 700)
 
 #include <ipmitool/ipmi_intf.h>
 #include <ipmitool/ipmi_mc.h>
@@ -38,13 +42,19 @@
 #include <ipmitool/ipmi_strings.h>
 #include <ipmitool/log.h>
 #include "../src/plugins/lan/md5.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <time.h>
 #include <sys/param.h>
+#include <unistd.h>
 
 #if HAVE_CONFIG_H
 # include <config.h>
 #endif
+
+/* From src/plugins/ipmi_intf.c: */
+uint16_t
+ipmi_intf_get_max_request_data_size(struct ipmi_intf * intf);
 
 extern int verbose;
 
@@ -106,6 +116,10 @@ int HpmFwupgActionUploadFirmware(struct HpmfwupgComponentBitMask components,
 		struct ipmi_intf *intf,
 		int option,
 		int *pFlagColdReset);
+int
+HpmfwupgPreUpgradeCheck(struct ipmi_intf *intf,
+		struct HpmfwupgUpgradeCtx *pFwupgCtx,
+		int componentMask, int option);
 
 /* HpmGetuserInput - get input from user
  *
@@ -294,7 +308,6 @@ HpmfwupgTargetCheck(struct ipmi_intf *intf, int option)
 	struct HpmfwupgGetTargetUpgCapabilitiesCtx targetCapCmd;
 	int rc = HPMFWUPG_SUCCESS;
 	int componentId = 0;
-	int flagColdReset = FALSE;
 	struct ipm_devid_rsp devIdrsp;
 	struct HpmfwupgGetComponentPropertiesCtx getCompProp;
 	int mode = 0;
@@ -430,13 +443,6 @@ HpmfwupgTargetCheck(struct ipmi_intf *intf, int option)
 				gVersionInfo[componentId].deferredAux[1] = 0xff;
 				gVersionInfo[componentId].deferredAux[2] = 0xff;
 				gVersionInfo[componentId].deferredAux[3] = 0xff;
-			}
-			if (gVersionInfo[componentId].coldResetRequired) {
-				/*
-				 * If any of the component indicates that the Payload Cold reset is required
-				 * then set the flag
-				 */
-				flagColdReset = TRUE;
 			}
 			if (option & VIEW_MODE) {
 				HpmDisplayVersion(mode,
@@ -996,15 +1002,11 @@ HpmfwupgUpgradeStage(struct ipmi_intf *intf,
 	struct HpmfwupgActionRecord* pActionRecord;
 	int rc = HPMFWUPG_SUCCESS;
 	unsigned char *pImagePtr;
-	unsigned int actionsSize;
 	int flagColdReset = FALSE;
-	time_t start,end;
 	/* Put pointer after image header */
 	pImagePtr = (unsigned char*)
 		(pFwupgCtx->pImageData + sizeof(struct HpmfwupgImageHeader) +
 		pImageHeader->oemDataLength + sizeof(unsigned char)/*checksum*/);
-	/* Deternime actions size */
-	actionsSize = pFwupgCtx->imageSize - sizeof(struct HpmfwupgImageHeader);
 	if (!(option & VIEW_MODE)) {
 		HpmDisplayUpgradeHeader();
 	}
@@ -1200,7 +1202,7 @@ HpmFwupgActionUploadFirmware(struct HpmfwupgComponentBitMask components,
 			} else {
 				count = (unsigned short)((pDataTemp+lengthOfBlock) - pData);
 			}
-			memcpy(&uploadCmd.req->data, pData, bufLength);
+			memcpy(&uploadCmd.req->data, pData, count);
 			imageOffset = 0x00;
 			blockLength = 0x00;
 			numTxPkts++;
@@ -1397,7 +1399,12 @@ HpmfwupgGetBufferFromFile(char *imageFilename,
 		return HPMFWUPG_ERROR;
 	}
 	/* Get the raw data in file */
-	fseek(pImageFile, 0, SEEK_END);
+	ret = fseek(pImageFile, 0, SEEK_END);
+	if (ret != 0) {
+		lprintf(LOG_ERR, "Failed to seek in the image file '%s'",
+				imageFilename);
+		return HPMFWUPG_ERROR;
+	}
 	pFwupgCtx->imageSize  = ftell(pImageFile);
 	pFwupgCtx->pImageData = malloc(sizeof(unsigned char)*pFwupgCtx->imageSize);
 	if (pFwupgCtx->pImageData == NULL) {
@@ -1869,7 +1876,6 @@ HpmfwupgGetUpgradeStatus(struct ipmi_intf *intf,
 		struct HpmfwupgUpgradeCtx *pFwupgCtx,
 		int silent)
 {
-	int rc = HPMFWUPG_SUCCESS;
 	struct ipmi_rs *rsp;
 	struct ipmi_rq req;
 	pCtx->req.picmgId = HPMFWUPG_PICMG_IDENTIFIER;
@@ -2023,13 +2029,13 @@ HpmfwupgQueryRollbackStatus(struct ipmi_intf *intf,
 		memcpy(&pCtx->resp, rsp->data,
 				sizeof(struct HpmfwupgQueryRollbackStatusResp));
 		if (pCtx->resp.rollbackComp.ComponentBits.byte != 0) {
-			/* Rollback occured */
+			/* Rollback occurred */
 			lprintf(LOG_NOTICE,
-					"Rollback occured on component mask: 0x%02x",
+					"Rollback occurred on component mask: 0x%02x",
 					pCtx->resp.rollbackComp.ComponentBits.byte);
 		} else {
 			lprintf(LOG_NOTICE,
-					"No Firmware rollback occured");
+					"No Firmware rollback occurred");
 		}
 	} else if (rsp->ccode == 0x81) {
 		lprintf(LOG_ERR,
@@ -2196,18 +2202,15 @@ HpmfwupgSendCmd(struct ipmi_intf *intf, struct ipmi_rq req,
 					lprintf(LOG_DEBUG, "HPM: try to re-open IOL session");
 					{
 						/* force session re-open */
-						intf->opened = 0;
-						intf->session->authtype = IPMI_SESSION_AUTHTYPE_NONE;
-						intf->session->session_id = 0;
-						intf->session->in_seq = 0;
-						intf->session->out_seq = 0;
-						intf->session->active = 0;
-						intf->session->retry = 10;
+						intf->abort = 1;
+						intf->close(intf);
+
 						while (intf->open(intf) == HPMFWUPG_ERROR
 								&& inaccessTimeoutCounter < inaccessTimeout) {
 							inaccessTimeoutCounter += (time(NULL) - timeoutSec1);
 							timeoutSec1 = time(NULL);
 						}
+
 						/* Fake timeout to retry command */
 						fakeRsp.ccode = 0xc3;
 						rsp = &fakeRsp;

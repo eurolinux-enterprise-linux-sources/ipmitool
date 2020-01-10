@@ -29,9 +29,13 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF PPS HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _GNU_SOURCE 1
 
 /* Serial Interface, Terminal Mode plugin. */
 
+#if defined HAVE_ALLOCA_H
+#include <alloca.h>
+#endif
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -43,7 +47,7 @@
 #include <ctype.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <termios.h>
 
 #include <ipmitool/ipmi.h>
@@ -75,7 +79,7 @@ struct ipmb_msg_hdr {
 	unsigned char rqSA;
 	unsigned char rqSeq;	/* RQ SEQ | RQ LUN */
 	unsigned char cmd;
-	unsigned char data[0];
+	unsigned char data[];
 };
 
 /*
@@ -97,7 +101,7 @@ struct ipmi_get_message_rp {
 	unsigned char rsSA;
 	unsigned char rqSeq;
 	unsigned char cmd;
-	unsigned char data[0];
+	unsigned char data[];
 };
 
 /*
@@ -225,10 +229,10 @@ ipmi_serial_term_open(struct ipmi_intf * intf)
 	/* set the new options for the port with flushing */
 	tcsetattr(intf->fd, TCSAFLUSH, &ti);
 
-	if (intf->session->timeout == 0)
-		intf->session->timeout = IPMI_SERIAL_TIMEOUT;
-	if (intf->session->retry == 0)
-		intf->session->retry = IPMI_SERIAL_RETRY;
+	if (intf->ssn_params.timeout == 0)
+		intf->ssn_params.timeout = IPMI_SERIAL_TIMEOUT;
+	if (intf->ssn_params.retry == 0)
+		intf->ssn_params.retry = IPMI_SERIAL_RETRY;
 
 	intf->opened = 1;
 
@@ -259,7 +263,7 @@ serial_wait_for_data(struct ipmi_intf * intf)
 	pfd.events = POLLIN;
 	pfd.revents = 0;
 
-	n = poll(&pfd, 1, intf->session->timeout*1000);
+	n = poll(&pfd, 1, intf->ssn_params.timeout*1000);
 	if (n < 0) {
 		lperror(LOG_ERR, "Poll for serial data failed");
 		return -1;
@@ -357,7 +361,7 @@ recv_response(struct ipmi_intf * intf, unsigned char *data, int len)
 {
 	char hex_rs[IPMI_SERIAL_MAX_RESPONSE * 3];
 	int i, j, resp_len = 0;
-	unsigned long rv;
+	long rv;
 	char *p, *pp;
 	char ch, str_hex[3];
 
@@ -369,8 +373,9 @@ recv_response(struct ipmi_intf * intf, unsigned char *data, int len)
 		}
 		p += rv;
 		resp_len += rv;
-		if (*(p - 2) == ']' && (*(p - 1) == '\n' || *(p - 1) == '\r')) {
-			*p = 0;
+		if (resp_len >= 2 && *(p - 2) == ']'
+			&& (*(p - 1) == '\n' || *(p - 1) == '\r')) {
+			*(p - 1) = 0; /* overwrite EOL */
 			break;
 		}
 	}
@@ -769,7 +774,7 @@ serial_term_get_message(struct ipmi_intf * intf,
 		tm = clock() - start;
 
 		tm /= CLOCKS_PER_SEC;
-	} while (tm < intf->session->timeout);
+	} while (tm < intf->ssn_params.timeout);
 
 	return 0;
 }
@@ -787,7 +792,7 @@ ipmi_serial_term_send_cmd(struct ipmi_intf * intf, struct ipmi_rq * req)
 	}
 
 	/* Send the message and receive the answer */
-	for (retry = 0; retry < intf->session->retry; retry++) {
+	for (retry = 0; retry < intf->ssn_params.retry; retry++) {
 		/* build output message */
 		bridging_level = serial_term_build_msg(intf, req, msg,
 				sizeof (msg), req_ctx, &msg_len);
@@ -882,33 +887,18 @@ ipmi_serial_term_send_cmd(struct ipmi_intf * intf, struct ipmi_rq * req)
 static int
 ipmi_serial_term_setup(struct ipmi_intf * intf)
 {
-	intf->session = malloc(sizeof(struct ipmi_session));
-	if (intf->session == NULL) {
-		lprintf(LOG_ERR, "ipmitool: malloc failure");
-		return -1;
-	}
-
-	memset(intf->session, 0, sizeof(struct ipmi_session));
-
 	/* setup default LAN maximum request and response sizes */
 	intf->max_request_data_size = IPMI_SERIAL_MAX_RQ_SIZE;
 	intf->max_response_data_size = IPMI_SERIAL_MAX_RS_SIZE;
-	return 0;
-}
 
-int
-ipmi_serial_term_set_my_addr(struct ipmi_intf * intf, uint8_t addr)
-{
-	intf->my_addr = addr;
 	return 0;
 }
 
 struct ipmi_intf ipmi_serial_term_intf = {
-	name:		"serial-terminal",
-	desc:		"Serial Interface, Terminal Mode",
-	setup:		ipmi_serial_term_setup,
-	open:		ipmi_serial_term_open,
-	close:		ipmi_serial_term_close,
-	sendrecv:	ipmi_serial_term_send_cmd,
-	set_my_addr:ipmi_serial_term_set_my_addr
+	.name = "serial-terminal",
+	.desc = "Serial Interface, Terminal Mode",
+	.setup = ipmi_serial_term_setup,
+	.open = ipmi_serial_term_open,
+	.close = ipmi_serial_term_close,
+	.sendrecv = ipmi_serial_term_send_cmd,
 };

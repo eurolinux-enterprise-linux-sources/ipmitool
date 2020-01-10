@@ -1,11 +1,11 @@
 dnl
 dnl autoconf for ipmitool
 dnl
-AC_INIT([src/ipmitool.c])
-AC_CANONICAL_SYSTEM
-AM_INIT_AUTOMAKE([ipmitool], [1.8.15])
-AM_CONFIG_HEADER(config.h)
+AC_INIT([ipmitool], [1.8.18])
 AC_CONFIG_SRCDIR([src/ipmitool.c])
+AC_CANONICAL_SYSTEM
+AM_INIT_AUTOMAKE
+AM_CONFIG_HEADER(config.h)
 AC_PREREQ(2.50)
 AC_SUBST(ac_configure_args)
 
@@ -26,14 +26,13 @@ AC_C_CONST
 AC_C_INLINE
 AC_C_BIGENDIAN
 
-AC_FUNC_MALLOC
 AC_FUNC_SELECT_ARGTYPES
 AC_FUNC_STRTOD
 AC_CHECK_FUNCS([alarm gethostbyname getaddrinfo getifaddrs socket select])
 AC_CHECK_FUNCS([memmove memset strchr strdup strerror])
 AC_CHECK_FUNCS([getpassphrase])
 
-CFLAGS="$CFLAGS -fno-strict-aliasing -Wreturn-type"
+CFLAGS="$CFLAGS -Wall -Wextra -std=gnu99 -pedantic -Wformat -Wformat-nonliteral"
 
 AM_PROG_LIBTOOL
 LIBTOOL="$LIBTOOL --silent"
@@ -57,13 +56,14 @@ dnl
 dnl set default option values
 dnl
 
-xenable_intf_bmc=no
-xenable_intf_imb=yes
-xenable_intf_open=yes
-xenable_intf_lipmi=yes
-#xenable_intf_serial=yes
-xenable_intf_dummy=no
 xenable_all_options=yes
+xenable_intf_bmc=no
+xenable_intf_dummy=no
+xenable_intf_imb=yes
+xenable_intf_lipmi=yes
+xenable_intf_open=yes
+#xenable_intf_serial=yes
+xenable_intf_usb=no
 xenable_ipmishell=yes
 
 dnl set some things so we build with GNU tools on Solaris
@@ -88,31 +88,29 @@ solaris*)
 	xenable_intf_imb=no
 	xenable_intf_open=no
 	xenable_intf_lipmi=no
-	xenable_intf_bmc=no
 	;;
 *darwin*|aix*)
 	# disable the linux and solaris-specific interfaces
 	xenable_intf_imb=no
 	xenable_intf_open=no
 	xenable_intf_lipmi=no
-	xenable_intf_bmc=no
 	xenable_ipmishell=no
 	;;
 *freebsd*)
 	xenable_intf_imb=no
 	xenable_intf_lipmi=no
-	xenable_intf_bmc=no
+	CFLAGS="$CFLAGS -D__BSD_VISIBLE"
 	;;
 *netbsd*)
 	xenable_intf_imb=no
 	xenable_intf_lipmi=no
-	xenable_intf_bmc=no
 	xenable_intf_open=no
 	;;
 gnu*)
 	# disable the linux and solaris-specific interfaces on Hurd
 	xenable_intf_imb=no
 	xenable_intf_open=no
+	xenable_intf_usb=yes
 	;;
 esac
 
@@ -131,6 +129,24 @@ if test "x$xenable_all_options" = "xyes" || test "x$xenable_solaris_opt" = "xyes
 	AC_DEFINE(ENABLE_ALL_OPTIONS, [1], [Define to 1 to enable all command line options.])
 fi
 
+dnl Determine anonymous union/structure support in GCC
+AC_TRY_COMPILE([
+#include <stdio.h>
+	], [
+	struct test {
+		union {
+			int a;
+			unsigned int b;
+		};
+	} test;
+
+	printf("a is %d", test.a);
+        ], ac_need_fms_extension=no, ac_need_fms_extension=yes)
+if test "x$ac_need_fms_extension" = "xyes"; then
+       CFLAGS="$CFLAGS -fms-extensions"
+       AC_SUBST(CFLAGS)
+fi
+
 dnl check for OpenSSL functionality
 AC_ARG_ENABLE([internal-md5],
 	[AC_HELP_STRING([--enable-internal-md5],
@@ -143,6 +159,16 @@ AC_CHECK_LIB([crypto], [EVP_aes_128_cbc],
 	    have_crypto=yes; LIBS="$LIBS -lcrypto"
 	fi],
 	[have_crypto=no], [-lcrypto])
+
+AC_CHECK_LIB([crypto], [EVP_sha256],
+	[if test "x$xenable_internal_sha256" != "xyes"; then
+		if test "x$have_crypto" != "xyes"; then
+			LIBS="$LIBS -lcrypto"
+		have_sha256=yes
+		fi
+		AC_DEFINE(HAVE_CRYPTO_SHA256, [1], [Define to 1 if libcrypto supports SHA256.])
+	fi],
+	[], [-lcrypto])
 
 AC_CHECK_LIB([crypto], [MD5_Init],
 	[if test "x$xenable_internal_md5" != "xyes"; then
@@ -178,6 +204,22 @@ if test "x$xenable_intf_lan" = "xyes"; then
 	AC_SUBST(INTF_LAN, [lan])
 	AC_SUBST(INTF_LAN_LIB, [libintf_lan.la])
 	IPMITOOL_INTF_LIB="$IPMITOOL_INTF_LIB lan/libintf_lan.la"
+fi
+
+dnl enable IPMI USB interface
+AC_ARG_ENABLE([intf-usb],
+	[AC_HELP_STRING([--enable-intf-usb],
+			[enable IPMI USB interface [default=auto]])],
+		[xenable_intf_usb=$enableval],
+		[xenable_intf_usb=$xenable_intf_usb])
+if test "x$xenable_intf_usb" = "xstatic" || test "x$xenable_intf_usb" = "xplugin"; then
+   xenable_intf_usb=yes
+fi
+if test "x$xenable_intf_usb" = "xyes"; then
+	AC_DEFINE(IPMI_INTF_USB, [1], [Define to 1 to enable USB interface.])
+	AC_SUBST(INTF_USB, [usb])
+	AC_SUBST(INTF_USB_LIB, [libintf_usb.la])
+	IPMITOOL_INTF_LIB="$IPMITOOL_INTF_LIB usb/libintf_usb.la"
 fi
 
 dnl enable IPMIv2.0 RMCP+ LAN interface
@@ -621,6 +663,7 @@ AC_CONFIG_FILES([Makefile
 		src/plugins/free/Makefile
 		src/plugins/imb/Makefile
 		src/plugins/bmc/Makefile
+		src/plugins/usb/Makefile
 		src/plugins/lipmi/Makefile
 		src/plugins/serial/Makefile
 		src/plugins/dummy/Makefile])
@@ -637,6 +680,7 @@ AC_MSG_RESULT([  open    : $xenable_intf_open])
 AC_MSG_RESULT([  free    : $xenable_intf_free])
 AC_MSG_RESULT([  imb     : $xenable_intf_imb])
 AC_MSG_RESULT([  bmc     : $xenable_intf_bmc])
+AC_MSG_RESULT([  usb     : $xenable_intf_usb])
 AC_MSG_RESULT([  lipmi   : $xenable_intf_lipmi])
 AC_MSG_RESULT([  serial  : $xenable_intf_serial])
 AC_MSG_RESULT([  dummy   : $xenable_intf_dummy])

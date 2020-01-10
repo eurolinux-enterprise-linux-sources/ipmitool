@@ -2,8 +2,8 @@
 
 Name:         ipmitool
 Summary:      Utility for IPMI control
-Version:      1.8.15
-Release:      7%{?dist}
+Version:      1.8.18
+Release:      5%{?dist}
 License:      BSD
 Group:        System Environment/Base
 URL:          http://ipmitool.sourceforge.net/
@@ -29,23 +29,11 @@ Provides: OpenIPMI-tools = 2.0.14-3
 
 Patch1:  0001-ipmitool-1.8.10-ipmievd-init.patch.patch
 Patch2:  0002-ipmitool-1.8.10-ipmievd-condrestart.patch.patch
-Patch3:  0003-ipmitool-1.8.11-ipmieved-pidfile.patch.patch
 Patch4:  0004-ipmitool-1.8.11-set-kg-key.patch.patch
-Patch5:  0005-ipmitool-1.8.11-set-kg-key2.patch.patch
-Patch6:  0006-ipmitool-1.8.11-sol-leak.patch.patch
 Patch7:  0007-ipmitool-1.8.11-remove-umask0.patch.patch
-Patch8:  0008-ipmitool-1.8.11-no-work-setaccess.patch.patch
 Patch9:  0009-ipmitool-1.8.11-bz1126333-slowswid.patch.patch
 Patch10: 0010-ipmitool-1.8.11-bz878614-overname.patch.patch
-Patch11: 0011-ipmitool-1.8.13-bmc-snmp.patch.patch
-Patch12: 0012-Avoid-assert-on-mismatched-session-ID.patch
-Patch13: 0013-ID-405-Use-meaningful-Generator-ID-for-ipmitool-sel-.patch
-Patch14: 0014-ID-382-Fix-memcpy-params-in-HpmFwupgActionUploadFirm.patch
 Patch15: 0015-ID-390-Support-for-new-Communication-Interface-USB-M.patch
-Patch16: 0016-ID-394-plugins-usb-Fix-probe-for-SCSI-devices.patch
-Patch17: 0017-Fix-missing-return-in-ipmi_kontronoem_main-CID-12613.patch
-Patch18: 0018-ID-437-sel-Fix-sel-time-set-time.patch
-Patch19: 0019-ID-408-fix-sel-list-last-X-listing.patch
 
 %description
 This package contains a utility for interfacing with devices that support
@@ -97,23 +85,11 @@ for the host OS to use.
 
 %patch1 -p1
 %patch2 -p1
-%patch3 -p1
 %patch4 -p1
-%patch5 -p1
-%patch6 -p1
 %patch7 -p1
-%patch8 -p1
 %patch9 -p1
 %patch10 -p1
-%patch11 -p1
-%patch12 -p1
-%patch13 -p1
-%patch14 -p1
 %patch15 -p1
-%patch16 -p1
-%patch17 -p1
-%patch18 -p1
-%patch19 -p1
 
 for f in AUTHORS ChangeLog; do
     iconv -f iso-8859-1 -t utf8 < ${f} > ${f}.utf8
@@ -205,6 +181,22 @@ install -Dm 755 contrib/bmc-snmp-proxy         %{buildroot}%{_libexecdir}/bmc-sn
 %{_libexecdir}/bmc-snmp-proxy
 
 %changelog
+* Mon Apr 10 2017 Josef Ridky <jridky@redhat.com> - 0:1.8.18-5
+- Remove RPMDiff fix file (#1439269) related to #1398658
+
+* Tue Feb 21 2017 Josef Ridky <jridky@redhat.com> - 0:1.8.18-4
+- Fix RPMDiff issues and rebuild
+
+* Thu Feb 16 2017 Josef Ridky <jridky@redhat.com> - 0:1.8.18-3
+- Fix issues with warning: dereferencing type-punned pointer 
+  will break strict-aliasing rules from RPMDiff
+
+* Mon Feb 13 2017 Josef Ridky <jridky@redhat.com> - 0:1.8.18-2
+- Fix issue in file sources
+
+* Thu Feb 02 2017 Josef Ridky <jridky@redhat.com> - 0:1.8.18-1
+- New upstream release 1.8.18 (#1398658)
+
 * Tue May 03 2016 Boris Ranto <branto@redhat.com> - 0:1.8.15-7
 - New release (0:1.8.15-7)
 - ID:437 - sel: Fix "sel time set <time>"

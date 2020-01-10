@@ -297,22 +297,24 @@ struct fru_picmgext_link_desc {
 	unsigned int desig_channel:6;
 	unsigned int desig_if:2;
 	unsigned int desig_port:4;
-#define FRU_PICMGEXT_LINK_TYPE_BASE					0x01
+#define FRU_PICMGEXT_LINK_TYPE_BASE			0x01
 #define FRU_PICMGEXT_LINK_TYPE_FABRIC_ETHERNET		0x02
 #define FRU_PICMGEXT_LINK_TYPE_FABRIC_INFINIBAND	0x03
-#define FRU_PICMGEXT_LINK_TYPE_FABRIC_STAR			0x04
-#define FRU_PICMGEXT_LINK_TYPE_PCIE					0x05
+#define FRU_PICMGEXT_LINK_TYPE_FABRIC_STAR		0x04
+#define FRU_PICMGEXT_LINK_TYPE_PCIE			0x05
+#define FRU_PICMGEXT_LINK_TYPE_FABRIC_ETHERNET_10GBD	0x32
 	unsigned int type:8;
 	unsigned int ext:4;
 	unsigned int grouping:8;
 #else
 	unsigned int grouping:8;
 	unsigned int ext:4;
-#define FRU_PICMGEXT_LINK_TYPE_BASE					0x01
+#define FRU_PICMGEXT_LINK_TYPE_BASE			0x01
 #define FRU_PICMGEXT_LINK_TYPE_FABRIC_ETHERNET		0x02
 #define FRU_PICMGEXT_LINK_TYPE_FABRIC_INFINIBAND	0x03
-#define FRU_PICMGEXT_LINK_TYPE_FABRIC_STAR			0x04
-#define FRU_PICMGEXT_LINK_TYPE_PCIE					0x05
+#define FRU_PICMGEXT_LINK_TYPE_FABRIC_STAR		0x04
+#define FRU_PICMGEXT_LINK_TYPE_PCIE			0x05
+#define FRU_PICMGEXT_LINK_TYPE_FABRIC_ETHERNET_10GBD	0x32
 	unsigned int type:8;
 	unsigned int desig_port:4;
 	unsigned int desig_if:2;
@@ -609,13 +611,6 @@ typedef struct ipmi_fru_bloc {
 	uint16_t size;
 	uint8_t  blocId[32];
 } t_ipmi_fru_bloc;
-
-static const char *section_id[4] = {
-	"Internal Use Section",
-	"Chassis Section",
-	"Board Section",
-	"Product Section"
-};
 
 int ipmi_fru_main(struct ipmi_intf *intf, int argc, char **argv);
 int ipmi_fru_print(struct ipmi_intf *intf, struct sdr_record_fru_locator *fru);

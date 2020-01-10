@@ -399,7 +399,6 @@ ipmi_ekanalyzer_usage(void)
 static int
 ipmi_ek_get_file_type(char *argument)
 {
-	int index_name=0;
 	int filetype = ERROR_STATUS;
 	if (strlen(argument) <= MIN_ARGUMENT) {
 		return filetype;
@@ -459,7 +458,6 @@ ipmi_ekanalyzer_main(struct ipmi_intf *intf, int argc, char **argv)
 {
 	int rc = ERROR_STATUS;
 	int file_type[MAX_FILE_NUMBER];
-	int tmp_ret = 0;
 	char *filename[MAX_FILE_NUMBER];
 	unsigned int argument_offset = 0;
 	unsigned int type_offset = 0;
@@ -509,7 +507,7 @@ ipmi_ekanalyzer_main(struct ipmi_intf *intf, int argc, char **argv)
 			rc = ipmi_ek_display_fru_header (filename[type_offset]);
 			if (rc != ERROR_STATUS) {
 				/* Display FRU header info in detail record */
-				tmp_ret = ipmi_ek_display_fru_header_detail(filename[type_offset]);
+				rc = ipmi_ek_display_fru_header_detail(filename[type_offset]);
 				/* Convert from binary data into multi record structure */
 				rc = ipmi_ekanalyzer_fru_file2structure (filename[type_offset],
 						&list_head, &list_record, &list_last );
@@ -604,10 +602,13 @@ ipmi_ekanalyzer_main(struct ipmi_intf *intf, int argc, char **argv)
 				 */
 				filename_size = strlen(argv[index]) - SIZE_OF_FILE_TYPE + 1;
 				if (filename_size > 0) {
-					/* TODO - check malloc() retval */
 					filename[i] = malloc( filename_size );
 					if (filename[i] != NULL) {
 						strcpy(filename[i], &argv[index][SIZE_OF_FILE_TYPE]);
+					} else {
+						lprintf(LOG_ERR, "ipmitool: malloc failure");
+						rc = ERROR_STATUS;
+						break;
 					}
 				}
 				rc = OK_STATUS;
@@ -2207,6 +2208,9 @@ ipmi_ek_create_amc_p2p_record(struct ipmi_ek_multi_header *record,
 		int index_oem = 0;
 		amc_record->oem_guid = malloc(amc_record->guid_count * \
 				sizeof(struct fru_picmgext_guid));
+		if (amc_record->oem_guid == NULL) {
+			return ERROR_STATUS;
+		}
 		for (index_oem = 0; index_oem < amc_record->guid_count;
 				index_oem++) {
 			memcpy(&amc_record->oem_guid[index_oem].guid,
@@ -2234,6 +2238,9 @@ ipmi_ek_create_amc_p2p_record(struct ipmi_ek_multi_header *record,
 		int ch_index = 0;
 		amc_record->ch_desc = malloc((amc_record->ch_count) * \
 				sizeof(struct fru_picmgext_amc_channel_desc_record));
+		if (amc_record->ch_desc == NULL) {
+			return ERROR_STATUS;
+		}
 		for (ch_index = 0; ch_index < amc_record->ch_count;
 				ch_index++) {
 			unsigned int data;
@@ -2257,6 +2264,9 @@ ipmi_ek_create_amc_p2p_record(struct ipmi_ek_multi_header *record,
 		int i=0;
 		amc_record->link_desc = malloc(amc_record->link_desc_count * \
 				sizeof(struct fru_picmgext_amc_link_desc_record));
+		if (amc_record->link_desc == NULL) {
+			return ERROR_STATUS;
+		}
 		for (i = 0; i< amc_record->link_desc_count; i++) {
 			unsigned int data[2];
 			struct fru_picmgext_amc_link_desc_record *src, *dst;
@@ -2426,7 +2436,7 @@ ipmi_ek_display_fru_header_detail(char *filename)
 		return (-1);
 	}
 	/*** Display FRU Internal Use Info ***/
-	if (!feof(input_file)) {
+	if (header.offset.internal != 0) {
 		unsigned char format_version;
 		unsigned long len = 0;
 
@@ -2769,10 +2779,13 @@ ipmi_ek_display_board_info_area(FILE *input_file, char *board_type,
 				lprintf(LOG_ERR, "ipmitool: malloc failure");
 				return (size_t)(-1);
 			}
-				
 			ret = fread(additional_data, size_board, 1, input_file);
 			if ((ret != 1) || ferror(input_file)) {
 				lprintf(LOG_ERR, "Invalid Additional Data!");
+				if (additional_data != NULL) {
+					free(additional_data);
+					additional_data = NULL;
+				}
 				goto out;
 			}
 			printf("Additional Custom Mfg. Data: %02x",
@@ -2865,7 +2878,6 @@ ipmi_ek_display_product_info_area(FILE *input_file, long offset)
 		return (-1);
 	}
 
-	fread(&data, 1, 1, input_file);
 	printf("Language Code: %d\n", data);
 	len--;
 	/* Product Mfg */
@@ -3362,7 +3374,7 @@ ipmi_ek_display_board_p2p_record(struct ipmi_ek_multi_header *record)
 		printf("\n");
 		offset += sizeof(struct fru_picmgext_guid);
 	}
-	for (offset;
+	for (offset = offset;
 			offset < record->header.len;
 			offset += sizeof(struct fru_picmgext_link_desc)) {
 		/* to solve little endian/big endian problem */
@@ -3521,7 +3533,7 @@ ipmi_ek_display_radial_ipmb0_record(struct ipmi_ek_multi_header *record)
 	if (record->data[offset] < 1) {
 		return;
 	}
-	for (offset; offset < record->header.len;) {
+	for (offset = offset; offset < record->header.len;) {
 		unsigned char entry_count = 0;
 		printf("   IPMB-0 Hub Descriptor\n");
 		printf("\tHardware Address: 0x%02x\n",
@@ -4045,14 +4057,18 @@ ipmi_ekanalyzer_fru_file2structure(char *filename,
 
 	fseek(input_file, multi_offset, SEEK_SET);
 	while (!feof(input_file)) {
-		/* TODO - check malloc() */
 		*list_record = malloc(sizeof(struct ipmi_ek_multi_header));
+		if (*list_record == NULL) {
+			lprintf(LOG_ERR, "ipmitool: malloc failure");
+			return ERROR_STATUS;
+		}
 		ret = fread(&(*list_record)->header, START_DATA_OFFSET, 1, 
 				input_file);
 		if ((ret != 1) || ferror(input_file)) {
-			/* TODO - no free?! */
-			lprintf(LOG_ERR, "Invalid Header!");
+			free(*list_record);
+			*list_record = NULL;
 			fclose(input_file);
+			lprintf(LOG_ERR, "Invalid Header!");
 			return ERROR_STATUS;
 		}
 		if ((*list_record)->header.len == 0) {

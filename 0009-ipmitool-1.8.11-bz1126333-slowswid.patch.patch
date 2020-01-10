@@ -18,7 +18,7 @@ index fa7b082..9bc5ac2 100644
  	uint32_t save_addr;
  	uint32_t save_channel;
  
-+	if ((strncmp(intf->name, "ipmb", 4)) != 0)
++	if (target == (uint8_t) 0xb1)
 +		return ipmi_sdr_get_sensor_reading(intf, sensor);
  	if ( BRIDGE_TO_SENSOR(intf, target, channel) ) {
  		lprintf(LOG_DEBUG,

@@ -10,47 +10,47 @@ ipmitool [ <options> ] <command> [ <sub-commands and sub-options> ]
 Any recognized option is accepted. Conditional options may be ignored or it's usage postponed until shell or exec processes relevant command.
 .br
 
-<general-options>   := [ -h | -V | -v | -I <interface> | -H <address> |
-                         -d <N> | -p <port> | -c | -U <username> |
-                         -L <privlvl> | -l <lun> | -m <local_address> |
-                         -N <sec> | -R <count> | <password-option> |
+<general\-options>   := [ \-h | \-V | \-v | \-I <interface> | \-H <address> |
+                         \-d <N> | \-p <port> | \-c | \-U <username> |
+                         \-L <privlvl> | \-l <lun> | \-m <local_address> |
+                         \-N <sec> | \-R <count> | <password\-option> |
                          <oem-option> | <bridge-options> ]
 
-<conditional-opts>  := [ <lan-options> | <lanplus-options> |
-                         <command-options> ]
+<conditional\-opts>  := [ <lan\-options> | <lanplus\-options> |
+                         <command\-options> ]
 .br
 Bridging:
 .br
-<bridge-options>    := -t <target_address> [ -b <channel> |
-                       [ -T <address> | -B <channel> ] ]
+<bridge\-options>    := \-t <target_address> [ \-b <channel> |
+                       [ \-T <address> | \-B <channel> ] ]
 .br
 
-Options used with -I lan:
+Options used with \-I lan:
 .br
-<lan-options>       := [ -A <authtype> ]
+<lan\-options>       := [ \-A <authtype> ]
 .br
 
-Options used with -I lanplus:
+Options used with \-I lanplus:
 .br
-<lanplus-options>   := [ -C <ciphersuite> | <key-option> ]
+<lanplus\-options>   := [ \-C <ciphersuite> | <key\-option> ]
 .br
 
 Option groups setting same value:
 .br
-<key-option>        := [ -k <key> | -K | -y <hex_key> | -Y ]
+<key\-option>        := [ \-k <key> | \-K | \-y <hex_key> | \-Y ]
 .br
-<password-option>   := [ -f <password_file> | -a | -P <password> | -E ]
+<password\-option>   := [ \-f <password_file> | \-a | \-P <password> | \-E ]
 .br
-<oem-option>        := [ -o <oemtype> | -g | -s ]
+<oem\-option>        := [ \-o <oemtype> | \-g | \-s ]
 .br
 
 Options used with specific command <command-options>:
 .br
-<options-sdr>       := [ -S <sdr_cache_file> ]
+<options\-sdr>       := [ \-S <sdr_cache_file> ]
 .br
-<options-sel>       := [ -O <sel_oem> ]
+<options\-sel>       := [ \-O <sel_oem> ]
 .br
-<options-sol>       := [ -e <sol_escape_char> ]
+<options\-sol>       := [ \-e <sol_escape_char> ]
 
 
 .SH "DESCRIPTION"
@@ -63,7 +63,7 @@ chassis power control.
 IPMI management of a local system interface requires a compatible IPMI
 kernel driver to be installed and configured.  On Linux this driver is
 called \fIOpenIPMI\fP and it is included in standard distributions.
-On Solaris this driver is called \fIBMC\fP and is inclued in Solaris 10.
+On Solaris this driver is called \fIBMC\fP and is included in Solaris 10.
 Management of a remote station requires the IPMI\-over\-LAN interface to be
 enabled and configured.  Depending on the particular requirements of each
 system it may be possible to enable the LAN interface using ipmitool over
@@ -120,7 +120,7 @@ option is absent, or if password_file is empty, the password
 will default to NULL.
 .TP 
 \fB\-g\fR
-Deprecated. Use: -o intelplus
+Deprecated. Use: \-o intelplus
 .TP 
 \fB\-h\fR
 Get basic usage help from the command line.
@@ -151,7 +151,7 @@ combined with \fI-t target address\fP.
 .TP 
 \fB\-m\fR <\fIlocal_address\fP>
 Set the local IPMB address.  The local address defaults to 0x20
-or is auto discovered on PICMG platforms when -m is not specified.
+or is auto discovered on PICMG platforms when \-m is not specified.
 There should be no need to change the local address for normal operation.
 .TP 
 \fB\-N\fR <\fIsec\fP>
@@ -185,7 +185,7 @@ Command \fIraw\fP uses fixed value of one try (no retries).
 Command \fIhpm\fP uses fixed value of 10 retries.
 .TP 
 \fB\-s\fR
-Deprecated. Use: -o supermicro
+Deprecated. Use: \-o supermicro
 .TP 
 \fB\-S\fR <\fIsdr_cache_file\fP>
 Use local file for remote SDR cache.  Using a local SDR cache
@@ -223,7 +223,7 @@ Display version information.
 \fB\-y\fR <\fIhex key\fP>
 Use supplied Kg key for IPMIv2.0 authentication. The key is expected in
 hexadecimal format and can be used to specify keys with non-printable
-characters. E.g. '-k PASSWORD' and '-y 50415353574F5244' are
+characters. E.g. '\-k PASSWORD' and '\-y 50415353574F5244' are
 equivalent.
 The default is not to use any Kg key.
 .TP 
@@ -291,6 +291,7 @@ Commands:
         kontronoem   Manage Kontron OEM Extensions
         lan          Configure LAN Channels
         mc           Management Controller status and global enables
+        nm           Node Manager
         pef          Configure Platform Event Filtering (PEF)
         picmg        Run a PICMG/ATA extended command
         power        Shortcut to chassis power commands
@@ -1051,7 +1052,7 @@ Display point to point physical connectivity between carriers and AMC modules.
 \fIpower\fP <\fBxx=filename1\fR> <\fBxx=filename2\fR> \fB...\fr
 .br
 
-Display power supply informations between carrier and AMC modules.
+Display power supply information between carrier and AMC modules.
 .TP
 \fIall\fP <\fBxx=filename\fR> <\fBxx=filename\fR> \fB...\fr
 .br
@@ -1063,7 +1064,7 @@ modules.
 .TP
 \fIfrushow\fP <\fBxx=filename\fR>
 .br
-Convert a binary FRU file into human readable text format. Use -v option to get
+Convert a binary FRU file into human readable text format. Use \-v option to get
 more display information.
 
 .RE
@@ -1081,56 +1082,56 @@ and an AMC module or between 2 AMC modules. Example:
   AMC slot B1 port 0 ==> On-Carrier Device 0 port 16
    Matching Result
    - From On-Carrier Device ID 0
-    -Channel ID 11 || Lane 0: enable
-    -Link Type: AMC.2 Ethernet
-    -Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
-    -Link Group ID: 0 || Link Asym. Match: exact match
+    \-Channel ID 11 || Lane 0: enable
+    \-Link Type: AMC.2 Ethernet
+    \-Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
+    \-Link Group ID: 0 || Link Asym. Match: exact match
    - To AMC slot B1
-    -Channel ID 0 || Lane 0: enable
-    -Link Type: AMC.2 Ethernet
-    -Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
-    -Link Group ID: 0 || Link Asym. Match: exact match
+    \-Channel ID 0 || Lane 0: enable
+    \-Link Type: AMC.2 Ethernet
+    \-Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
+    \-Link Group ID: 0 || Link Asym. Match: exact match
    *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
   AMC slot B1 port 1 ==> On-Carrier Device 0 port 12
    Matching Result
    - From On-Carrier Device ID 0
-    -Channel ID 6 || Lane 0: enable
-    -Link Type: AMC.2 Ethernet
-    -Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
-    -Link Group ID: 0 || Link Asym. Match: exact match
+    \-Channel ID 6 || Lane 0: enable
+    \-Link Type: AMC.2 Ethernet
+    \-Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
+    \-Link Group ID: 0 || Link Asym. Match: exact match
    - To AMC slot B1
-    -Channel ID 1 || Lane 0: enable
-    -Link Type: AMC.2 Ethernet
-    -Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
-    -Link Group ID: 0 || Link Asym. Match: exact match
+    \-Channel ID 1 || Lane 0: enable
+    \-Link Type: AMC.2 Ethernet
+    \-Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
+    \-Link Group ID: 0 || Link Asym. Match: exact match
    *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
  On-Carrier Device vs AMC slot A2
   AMC slot A2 port 0 ==> On-Carrier Device 0 port 3
    Matching Result
    - From On-Carrier Device ID 0
-    -Channel ID 9 || Lane 0: enable
-    -Link Type: AMC.2 Ethernet
-    -Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
-    -Link Group ID: 0 || Link Asym. Match: exact match
+    \-Channel ID 9 || Lane 0: enable
+    \-Link Type: AMC.2 Ethernet
+    \-Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
+    \-Link Group ID: 0 || Link Asym. Match: exact match
    - To AMC slot A2
-    -Channel ID 0 || Lane 0: enable
-    -Link Type: AMC.2 Ethernet
-    -Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
-    -Link Group ID: 0 || Link Asym. Match: exact match
+    \-Channel ID 0 || Lane 0: enable
+    \-Link Type: AMC.2 Ethernet
+    \-Link Type extension: 1000BASE-BX (SerDES Gigabit) Ethernet link
+    \-Link Group ID: 0 || Link Asym. Match: exact match
    *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
  AMC slot B1 vs AMC slot A2
   AMC slot A2 port 2 ==> AMC slot B1 port 2
    Matching Result
    - From AMC slot B1
-    -Channel ID 2 || Lane 0: enable
-    -Link Type: AMC.3 Storage
-    -Link Type extension: Serial Attached SCSI (SAS/SATA)
-    -Link Group ID: 0 || Link Asym. Match: FC or SAS interface {exact match}
+    \-Channel ID 2 || Lane 0: enable
+    \-Link Type: AMC.3 Storage
+    \-Link Type extension: Serial Attached SCSI (SAS/SATA)
+    \-Link Group ID: 0 || Link Asym. Match: FC or SAS interface {exact match}
    - To AMC slot A2
-    -Channel ID 2 || Lane 0: enable
-    -Link Type: AMC.3 Storage
-    -Link Type extension: Serial Attached SCSI (SAS/SATA)
-    -Link Group ID: 0 || Link Asym. Match: FC or SAS interface {exact match}
+    \-Channel ID 2 || Lane 0: enable
+    \-Link Type: AMC.3 Storage
+    \-Link Type extension: Serial Attached SCSI (SAS/SATA)
+    \-Link Group ID: 0 || Link Asym. Match: FC or SAS interface {exact match}
  *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
 .TP
 \fIunmatch\fP <\fBxx=filename\fR> <\fBxx=filename\fR> \fB...\fr
@@ -1921,6 +1922,27 @@ ADMIN, issue the following command:
 
 > ipmitool \-I \fIinterface\fR lan set \fIchannel\fR cipher_privs uaXXXXXXXXXXXXX
 
+.TP
+
+\fIbad_pass_thresh\fP <\fBthresh_num\fR> <\fB1|0\fR> <\fBreset_interval\fR> <\fBlockout_interval\fR>
+.br
+
+Sets the Bad Password Threshold.
+
+<\fBthresh_num\fR> If non-zero, this value determines the number of sequential bad passwords
+that will be allowed to be entered for the identified user before the user is automatically
+disabled from access on the channel.
+
+<\fB1|0\fR> 1 = generate a Session Audit sensor "Invalid password disable" event message.
+0 = do not generate an event message when the user is disabled.
+
+<\fBreset_interval\fR> Attempt Count Reset Interval. The interval, in tens of seconds, for
+which the accumulated count of bad password attempts is retained before being automatically
+reset to zero.
+
+<\fBlockout_interval\fR> User Lockout Interval. The interval, in tens of seconds, that the user
+will remain disabled after being disabled because the Bad Password Threshold number was reached.
+
 .RE
 .TP
 \fIalert\fP \fIprint\fP [<\fBchannel\fR>] [<\fBalert destination\fR>]
@@ -2382,6 +2404,272 @@ Clear valid bit on power up via power push button or wake event
 .RE
 .RE
 .RE
+.TP
+\fInm\fP
+.RS
+.TP
+\fIalert\fP
+.RS
+.TP
+\fIclear dest\fP <\fBdest\fR>
+.br
+
+Clear the Node Manager Alert lan destination.
+
+.RE
+.RS
+.TP
+\fIget\fP
+.br
+Get the Node Manager Alert settings.
+
+.RE
+.RS
+.TP
+\fIset chan\fP <\fBchan\fR> \fIdest\fP <\fBdest\fR> \fIstring\fP <\fBstring\fR>
+.br
+
+Set the Node Manager alert channel, lan destination, and alert string number.
+
+.RE
+.TP
+\fIcapability\fP
+.br
+
+Obtain the Node Manager power control capabilities and ranges.
+
+.TP
+\fIcontrol\fP
+.RS
+.TP
+\fIenable\fP|\fIdisable \fP
+.RS
+.TP
+\fIglobal\fP
+.br
+
+Enable/disable all policies for all domains.
+.TP
+\fIper_domain\fP <platform|CPU|Memory>
+.br
+
+Enable/disable all policies of the specified domain.
+.TP
+\fIper_policy\fP <0-7>
+.br
+
+Enable/disable the policy for the specified domain/policy combination.
+.RE
+.RE
+.TP
+\fIdiscover\fP
+.br
+
+Discover Node Manager presence as well as the Node Manager version, revision, and patch number.
+
+.TP
+\fIpolicy\fP
+.RS
+.TP
+\fIadd\fP
+.RS
+.TP
+\fIpower\fP <watts> \fIpolicy_id\fP <0-7> [\fIcorrection\fP auto|soft|hard] \fItrig_lim\fP <seconds> \fIstats\fP <seconds> [\fIdomain\fP <platform|CPU|Memory>] \fIenable\fP|\fIdisable\fP
+.br
+
+Add a new power policy, or overwrite an existing policy.
+The \fIcorrection\fP parameter is the agressiveness of frequency limiting, default is auto.
+The \fItrig_lim\fP is the correction time limit and must be at least 6000 and not greater than 65535.
+The \fIstats\fP setting is the averaging period in seconds and ranges from 1-65535.
+If domain is not supplied a default of platform is used.
+
+
+.TP
+\fIinlet\fP <temp> \fIpolicy_id\fP <0-7> [\fIcorrection\fP auto|soft|hard] \fItrig_lim\fP <seconds> \fIstats\fP <seconds> [\fIdomain\fP <platform|CPU|Memory>] \fIenable\fP|\fIdisable\fP
+.br
+
+Add a new inlet temp policy, or overwrite an existing policy.
+The \fIcorrection\fP parameter is the agressiveness of frequency limiting, default is auto.
+The \fItrig_lim\fP is the correction time limit and must be at least 6000 and not greater than 65535.
+The \fIstats\fP setting is the averaging period in seconds and ranges from 1-65535.
+If domain is not supplied a default of platform is used.
+
+
+.RE
+.TP
+\fIget\fP \fIpolicy_id\fP <0-7>
+.br
+
+Get a previously stored policy.
+.TP
+\fIlimiting\fP
+.br
+
+Report policy number if any policy is limiting power.
+.TP
+\fIremove\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Remove a policy. If domain is not supplied a default of platform is used.
+.RE
+.TP
+\fIpower\fP \fImin\fP <minimum> \fImax\fP <maximum> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Configure Node Manager power minimum and maximum power draw limits.
+The \fImin\fP and \fImax\fP values must be in the range of 0-65535.
+If domain is not supplied a default of platform is used.
+
+.RE
+.RS
+.TP
+\fIreset\fP
+.RS
+.TP
+\fIcomm\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Reset Node Manager communication statistics.
+If domain is not supplied a default of platform is used.
+
+.TP
+\fIglobal\fI 
+.br
+
+Reset Node Manager global statistics.
+
+.TP
+\fImemory\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Reset Node Manager memory throttling statistics.
+If domain is not supplied a default of platform is used.
+
+.TP
+\fIper_policy\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Reset Node Manager per policy statistics.
+If domain is not supplied a default of platform is used.
+
+.TP
+\fIrequests\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Reset Node Manager unhandled requests statistics.
+If domain is not supplied a default of platform is used.
+
+.TP
+\fIresponse\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Reset Node Manager response time statistics.
+If domain is not supplied a default of platform is used.
+
+.TP
+\fIthrottling\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Reset Node Manager throttling statistics.
+If domain is not supplied a default of platform is used.
+
+.RE
+.TP
+\fIstatistics\fP
+.RS
+.TP
+\fIcomm_fail\fP
+.br
+
+Report Node Manager communication failure statistics.
+
+.TP
+\fIcpu_throttling\fP
+.br
+
+Report Node Manager cpu throttling statistics.
+
+.TP
+\fImem_throttling\fP
+.br
+
+Report Node Manager memory throttling statistics.
+
+.TP
+\fIpolicy_power\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Report Node Manager per policy power statistics (policy must be a power limit type policy).
+If domain is not supplied a default of platform is used.
+
+.TP
+\fIpolicy_temps\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Report Node Manager per policy temp statistics (policy must be an inlet temp limit policy).
+If domain is not supplied a default of platform is used.
+
+.TP
+\fIpolicy_throt\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Report Node Manager per policy throttling statistics.
+If domain is not supplied a default of platform is used.
+
+.TP
+\fIrequests\fP
+.br
+
+Report Node Manager unhandled requests statistics.
+
+.TP
+\fIresponse\fP
+.br
+
+Report Node Manager response time statistics.
+
+.RE
+.TP
+\fIsuspend\fP
+.RS
+.TP
+\fIget\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Get Node Manager policy suspend periods.
+If domain is not supplied a default of platform is used.
+
+.TP
+\fIset\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>] <start> <stop> <repeat>
+.br
+
+Set Node Manager policy suspend periods.
+If domain is not supplied a default of platform is used.
+The <start> and <stop> values must be in the range of 0-239, which is the number of minutes past midnight divided by 6.
+The <repeat> value is the daily recurrence pattern. Bit 0 is repeat every Monday, bit 1 is repeat every Tuesday, on through bit 6 for Sunday.
+
+.RE
+.TP
+\fIthreshold\fP
+.RS
+.TP
+\fIget\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>]
+.br
+
+Get Node Manager policy Alert Threshold settings.
+If domain is not supplied a default of platform is used.
+
+.TP
+\fIset\fP \fIpolicy_id\fP <0-7> [\fIdomain\fP <platform|CPU|Memory>] \fIthresh_array\fP
+.br
+
+Set Node Manager policy Alert Threshold values.
+If domain is not supplied a default of platform is used.
+The \fIthresh_array\fP is 1, 2, or 3 integers that set three alert threshold settings. The setting type is a power or temperature value which must match the type of policy.
+
+.RE
+.RE
+
 .TP 
 \fIpef\fP
 .RS
@@ -2981,7 +3269,7 @@ I2C Master Write\-Read IPMI command.
 
 Execute the service processor command line interface commands.
 Without any command string, an interactive session is started
-in the service processor command line environ ment.  If a
+in the service processor command line environment.  If a
 command string is specified, the command string is executed
 on the service processor and the connection is closed.
 .TP
@@ -3227,7 +3515,7 @@ a 2.4\-based kernel in order for ipmitool to work:
 Incoming and outgoing message handler for IPMI interfaces.
 .TP 
 .B ipmi_kcs_drv
-An IPMI Keyboard Controler Style (KCS) interface driver for the message handler.
+An IPMI Keyboard Controller Style (KCS) interface driver for the message handler.
 .TP 
 .B ipmi_devintf
 Linux character device interface for the message handler.
@@ -3265,7 +3553,7 @@ ipmitool includes some sample initialization scripts that
 can perform this task automatically at start\-up.
 
 In order to have ipmitool use the OpenIPMI device interface
-you can specifiy it on the command line:
+you can specify it on the command line:
 .PP 
 ipmitool \fB\-I\fR \fIopen\fP <\fIcommand\fP>
 .SH "BMC INTERFACE"
@@ -3376,7 +3664,7 @@ encryption algorightms.
 The ipmitool \fIfree\fP interface utilizes the FreeIPMI libfreeipmi
 drivers.  
 .LP
-You can tell ipmitool to use the FreeIPMI interface with the -I option:
+You can tell ipmitool to use the FreeIPMI interface with the \-I option:
 .PP
 ipmitool \fB\-I\fR \fIfree\fP <\fIcommand\fP>
 
@@ -3386,7 +3674,7 @@ ipmitool \fB\-I\fR \fIfree\fP <\fIcommand\fP>
 The ipmitool \fIimb\fP interface supports the Intel IMB (Intel
 Inter-module Bus) Interface through the /dev/imb device.  
 .LP
-You can tell ipmitool to use the IMB interface with the -I option:
+You can tell ipmitool to use the IMB interface with the \-I option:
 .PP
 ipmitool \fB\-I\fR \fIimb\fP <\fIcommand\fP>
 

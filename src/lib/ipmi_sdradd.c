@@ -38,6 +38,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #include <ipmitool/helper.h>
 #include <ipmitool/log.h>
@@ -512,7 +513,6 @@ int ipmi_parse_range_list(const char *rangeList, unsigned char * pHexList)
 int
 ipmi_sdr_add_from_list(struct ipmi_intf *intf, const char *rangeList)
 {
-  int i;
   int rc = 0;
   int slave_addr;
   int myaddr = intf->target_addr;
@@ -575,7 +575,6 @@ ipmi_sdr_add_from_list(struct ipmi_intf *intf, const char *rangeList)
 static int
 ipmi_sdr_read_records(const char *filename, struct sdrr_queue *queue)
 {
-  struct sdr_get_rs header;
   int rc = 0;
   int fd;
   uint8_t binHdr[5];
@@ -633,6 +632,7 @@ ipmi_sdr_read_records(const char *filename, struct sdrr_queue *queue)
       queue->tail->next = sdrr;
     queue->tail = sdrr;
   }
+  close(fd);
   return rc;
 }
 

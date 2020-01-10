@@ -36,6 +36,12 @@
 #include <ipmitool/log.h>
 #include <ipmitool/bswap.h>
 
+/* From src/plugins/ipmi_intf.c: */
+void
+ipmi_intf_set_max_request_data_size(struct ipmi_intf * intf, uint16_t size);
+void
+ipmi_intf_set_max_response_data_size(struct ipmi_intf * intf, uint16_t size);
+
 #if HAVE_PRAGMA_PACK
 # pragma pack(push, 1)
 #endif
@@ -128,7 +134,7 @@ int hpm2_get_capabilities(struct ipmi_intf * intf,
 #endif
 
 	/* check HPM.2 revision */
-	if (caps->hpm2_revision_id != HPM2_REVISION) {
+	if (caps->hpm2_revision_id == 0) {
 		lprintf(LOG_NOTICE, "Bad HPM.2 revision, rev=%d",
 				caps->hpm2_revision_id);
 		return -1;
@@ -213,8 +219,8 @@ int hpm2_get_lan_channel_capabilities(struct ipmi_intf * intf,
 	/* send */
 	rsp = intf->sendrecv(intf, &req);
 
-	if (rsp) {
-		lprintf(LOG_NOTICE, "Error sending request");
+	if (!rsp) {
+		lprintf(LOG_NOTICE, "Error sending request.");
 		return -1;
 	}
 

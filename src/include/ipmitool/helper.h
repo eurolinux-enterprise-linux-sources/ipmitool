@@ -83,9 +83,12 @@ int str2ushort(const char * str, uint16_t * ushrt_ptr);
 int str2char(const char * str, int8_t * chr_ptr);
 int str2uchar(const char * str, uint8_t * uchr_ptr);
 
+int eval_ccode(const int ccode);
+
 int is_fru_id(const char *argv_ptr, uint8_t *fru_id_ptr);
 int is_ipmi_channel_num(const char *argv_ptr, uint8_t *channel_ptr);
 int is_ipmi_user_id(const char *argv_ptr, uint8_t *ipmi_uid_ptr);
+int is_ipmi_user_priv_limit(const char *argv_ptr, uint8_t *ipmi_priv_limit_ptr);
 
 uint16_t str2val(const char * str, const struct valstr * vs);
 void print_valstr(const struct valstr * vs, const char * title, int loglevel);
@@ -94,7 +97,12 @@ void print_valstr_2col(const struct valstr * vs, const char * title, int logleve
 
 uint16_t buf2short(uint8_t * buf);
 uint32_t buf2long(uint8_t * buf);
-const char * buf2str(uint8_t * buf, int len);
+#define BUF2STR_MAXIMUM_OUTPUT_SIZE	(3*1024 + 1)
+const char * buf2str_extended(const uint8_t *buf, int len, const char *sep);
+const char * buf2str(const uint8_t *buf, int len);
+int str2mac(const char *arg, uint8_t *buf);
+const char * mac2str(const uint8_t *buf);
+int ipmi_parse_hex(const char *str, uint8_t *out, int size);
 void printbuf(const uint8_t * buf, int len, const char * desc);
 uint8_t ipmi_csum(uint8_t * d, int s);
 FILE * ipmi_open_file(const char * file, int rw);

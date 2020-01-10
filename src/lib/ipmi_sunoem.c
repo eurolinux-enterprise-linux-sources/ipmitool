@@ -29,14 +29,13 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _XOPEN_SOURCE
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
@@ -47,6 +46,7 @@
 #include <sys/time.h>
 #include <limits.h>
 #include <fcntl.h>
+#include <sys/select.h>
 
 #include <termios.h>
 
@@ -469,7 +469,7 @@ ipmi_sunoem_led_get(struct ipmi_intf * intf, int argc, char ** argv)
 		ledtype = str2val(argv[1], sunoem_led_type_vals);
 		if (ledtype == 0xFF)
 			lprintf(LOG_ERR,
-					"Unknow ledtype, will use data from the SDR oem field");
+					"Unknown ledtype, will use data from the SDR oem field");
 	}
 
 	if (strncasecmp(argv[0], "all", 3) == 0) {
@@ -676,7 +676,7 @@ ipmi_sunoem_led_set(struct ipmi_intf * intf, int argc, char ** argv)
 		ledtype = str2val(argv[2], sunoem_led_type_vals);
 		if (ledtype == 0xFF)
 			lprintf(LOG_ERR,
-					"Unknow ledtype, will use data from the SDR oem field");
+					"Unknown ledtype, will use data from the SDR oem field");
 	}
 
 	if (strncasecmp(argv[0], "all", 3) == 0) {
@@ -1361,9 +1361,6 @@ ipmi_sunoem_echo(struct ipmi_intf * intf, int argc, char *argv[])
 
 	/* Fill in data packet */
 	for (i = 0; i < ECHO_DATA_SIZE; i++) {
-		if (i > UINT8_MAX)
-			break;
-
 		echo_req.data[i] = (uint8_t) i;
 	}
 
@@ -1439,7 +1436,7 @@ ipmi_sunoem_echo(struct ipmi_intf * intf, int argc, char *argv[])
 
 		received++;
 		if (!quiet_mode) {
-			printf("Receive %u Bytes - Seq. # %d time=%d ms\n",
+			printf("Receive %lu Bytes - Seq. # %d time=%d ms\n",
 					sizeof(sunoem_echo_msg_t), echo_rsp->seq_num, resp_time);
 		}
 	} /* for (i = 0; i < num; i++) */

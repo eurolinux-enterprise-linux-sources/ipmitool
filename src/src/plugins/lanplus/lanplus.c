@@ -29,12 +29,15 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _GNU_SOURCE
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <inttypes.h>
 #include <string.h>
+#include <sys/time.h>
 #include <sys/types.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -54,6 +57,7 @@
 #include <ipmitool/ipmi_lanp.h>
 #include <ipmitool/ipmi_channel.h>
 #include <ipmitool/ipmi_intf.h>
+#include <ipmitool/ipmi_sel.h>
 #include <ipmitool/ipmi_strings.h>
 #include <ipmitool/hpm2.h>
 #include <ipmitool/bswap.h>
@@ -126,18 +130,18 @@ static void ipmi_lanp_set_max_rp_data_size(struct ipmi_intf * intf, uint16_t siz
 static uint8_t bridgePossible = 0;
 
 struct ipmi_intf ipmi_lanplus_intf = {
-	name:		"lanplus",
-	desc:		"IPMI v2.0 RMCP+ LAN Interface",
-	setup:		ipmi_lanplus_setup,
-	open:		ipmi_lanplus_open,
-	close:		ipmi_lanplus_close,
-	sendrecv:	ipmi_lanplus_send_ipmi_cmd,
-	recv_sol:	ipmi_lanplus_recv_sol,
-	send_sol:	ipmi_lanplus_send_sol,
-	keepalive:	ipmi_lanplus_keepalive,
-	set_max_request_data_size: ipmi_lanp_set_max_rq_data_size,
-	set_max_response_data_size: ipmi_lanp_set_max_rp_data_size,
-	target_addr:	IPMI_BMC_SLAVE_ADDR,
+	.name = "lanplus",
+	.desc = "IPMI v2.0 RMCP+ LAN Interface",
+	.setup = ipmi_lanplus_setup,
+	.open = ipmi_lanplus_open,
+	.close = ipmi_lanplus_close,
+	.sendrecv = ipmi_lanplus_send_ipmi_cmd,
+	.recv_sol = ipmi_lanplus_recv_sol,
+	.send_sol = ipmi_lanplus_send_sol,
+	.keepalive = ipmi_lanplus_keepalive,
+	.set_max_request_data_size = ipmi_lanp_set_max_rq_data_size,
+	.set_max_response_data_size = ipmi_lanp_set_max_rp_data_size,
+	.target_addr = IPMI_BMC_SLAVE_ADDR,
 };
 
 
@@ -165,9 +169,14 @@ int lanplus_get_requested_ciphers(int       cipher_suite_id,
 								  uint8_t * integrity_alg,
 								  uint8_t * crypt_alg)
 {
+#ifdef HAVE_CRYPTO_SHA256
+	if ((cipher_suite_id < 0) || (cipher_suite_id > 17)) {
+		return 1;
+	}
+#else
 	if ((cipher_suite_id < 0) || (cipher_suite_id > 14))
 		return 1;
-
+#endif /* HAVE_CRYPTO_SHA256 */
 		/* See table 22-19 for the source of the statement */
 	switch (cipher_suite_id)
 	{
@@ -246,6 +255,23 @@ int lanplus_get_requested_ciphers(int       cipher_suite_id,
 		*integrity_alg = IPMI_INTEGRITY_MD5_128;
 		*crypt_alg     = IPMI_CRYPT_XRC4_40;
 		break;
+#ifdef HAVE_CRYPTO_SHA256
+	case 15:
+		*auth_alg      = IPMI_AUTH_RAKP_HMAC_SHA256;
+		*integrity_alg = IPMI_INTEGRITY_NONE;
+		*crypt_alg     = IPMI_CRYPT_NONE;
+		break;
+	case 16:
+		*auth_alg      = IPMI_AUTH_RAKP_HMAC_SHA256;
+		*integrity_alg = IPMI_INTEGRITY_HMAC_SHA256_128;
+		*crypt_alg     = IPMI_CRYPT_NONE;
+		break;
+	case 17:
+		*auth_alg      = IPMI_AUTH_RAKP_HMAC_SHA256;
+		*integrity_alg = IPMI_INTEGRITY_HMAC_SHA256_128;
+		*crypt_alg     = IPMI_CRYPT_AES_CBC_128;
+		break;
+#endif /* HAVE_CRYPTO_SHA256 */
 	}
 
 	return 0;
@@ -383,6 +409,9 @@ ipmi_req_clear_entries(void)
 		free(e);
 		e = p;
 	}
+
+	ipmi_req_entries = NULL;
+	ipmi_req_entries_tail = NULL;
 }
 
 
@@ -595,107 +624,111 @@ ipmiv2_lan_ping(struct ipmi_intf * intf)
 
 /**
  *
- * ipmi_lan_poll_recv
+ * ipmi_lan_poll_single
  *
  * Receive whatever comes back.  Ignore received packets that don't correspond
  * to a request we've sent.
  *
- * Returns: the ipmi_rs packet describing the/a reponse we expect.
+ * Returns: the ipmi_rs packet describing the/a response we expect.
  */
 static struct ipmi_rs *
-ipmi_lan_poll_recv(struct ipmi_intf * intf)
+ipmi_lan_poll_single(struct ipmi_intf * intf)
 {
-	struct rmcp_hdr rmcp_rsp;
+	struct rmcp_hdr * rmcp_rsp;
 	struct ipmi_rs * rsp;
 	struct ipmi_session * session = intf->session;
 	int offset, rv;
 	uint16_t payload_size;
-	uint8_t ourAddress = intf->my_addr;
 
-	if (ourAddress == 0) {
-		ourAddress = IPMI_BMC_SLAVE_ADDR;
-	}
-
+	/* receive packet */
 	rsp = ipmi_lan_recv_packet(intf);
 
+	/* check if no packet has come */
+	if (rsp == NULL) {
+		return NULL;
+	}
+
+	/* parse response headers */
+	rmcp_rsp = (struct rmcp_hdr *)rsp->data;
+
+	if (rmcp_rsp->class == RMCP_CLASS_ASF) {
+		/* might be ping response packet */
+		rv = ipmi_handle_pong(intf, rsp);
+		return (rv <= 0) ? NULL : rsp;
+	}
+
+	if (rmcp_rsp->class != RMCP_CLASS_IPMI) {
+		lprintf(LOG_DEBUG, "Invalid RMCP class: %x", rmcp_rsp->class);
+		/* read one more packet */
+		return (struct ipmi_rs *)1;
+	}
+
 	/*
-	 * Not positive why we're looping.  Do we sometimes get stuff we don't
-	 * expect?
+	 * The authtype / payload type determines what we are receiving
 	 */
-	while (rsp != NULL) {
+	offset = 4;
 
-		/* parse response headers */
-		memcpy(&rmcp_rsp, rsp->data, 4);
+	/*--------------------------------------------------------------------
+	 *
+	 * The current packet could be one of several things:
+	 *
+	 * 1) An IPMI 1.5 packet (the response to our GET CHANNEL
+	 *    AUTHENTICATION CAPABILITIES request)
+	 * 2) An RMCP+ message with an IPMI response payload
+	 * 3) AN RMCP+ open session response
+	 * 4) An RAKP-2 message (response to an RAKP 1 message)
+	 * 5) An RAKP-4 message (response to an RAKP 3 message)
+	 * 6) A Serial Over LAN packet
+	 * 7) An Invalid packet (one that doesn't match a request)
+	 * -------------------------------------------------------------------
+	 */
 
-		if (rmcp_rsp.class == RMCP_CLASS_ASF) {
-			/* might be ping response packet */
-			rv = ipmi_handle_pong(intf, rsp);
-			return (rv <= 0) ? NULL : rsp;
-		}
+	read_session_data(rsp, &offset, intf->session);
 
-		if (rmcp_rsp.class != RMCP_CLASS_IPMI) {
-			lprintf(LOG_DEBUG, "Invalid RMCP class: %x",
-				rmcp_rsp.class);
-			rsp = ipmi_lan_recv_packet(intf);
-			continue;
-		}
+	/*
+	 * Skip packets that are not intended for this session
+	 */
+	if ((session->v2_data.session_state == LANPLUS_STATE_ACTIVE)    &&
+		 (rsp->session.authtype == IPMI_SESSION_AUTHTYPE_RMCP_PLUS) &&
+		 (rsp->session.id != intf->session->v2_data.console_id))
+	{
+		lprintf(LOG_INFO, "packet session id 0x%x does not "
+			"match active session 0x%0x",
+			rsp->session.id, intf->session->v2_data.console_id);
+		lprintf(LOG_ERR, "ERROR: Received an Unexpected message ID");
+		/* read one more packet */
+		return (struct ipmi_rs *)1;
+	}
 
+	if (lanplus_has_valid_auth_code(rsp, intf->session) == 0) {
+		lprintf(LOG_ERR, "ERROR: Received message with invalid authcode!");
+		return NULL;
+	}
 
-		/*
-		 * The authtype / payload type determines what we are receiving
-		 */
-		offset = 4;
+	if ((session->v2_data.session_state == LANPLUS_STATE_ACTIVE)    &&
+			(rsp->session.authtype == IPMI_SESSION_AUTHTYPE_RMCP_PLUS) &&
+			(rsp->session.bEncrypted)) {
+		lanplus_decrypt_payload(session->v2_data.crypt_alg,
+				session->v2_data.k2,
+				rsp->data + offset,
+				rsp->session.msglen,
+				rsp->data + offset,
+				&payload_size);
+	} else {
+		payload_size = rsp->session.msglen;
+	}
 
+	/*
+	 * Handle IPMI responses (case #1 and #2) -- all IPMI responses
+	 */
+	if (rsp->session.payloadtype == IPMI_PAYLOAD_TYPE_IPMI) {
+		struct ipmi_rq_entry * entry;
+		int payload_start = offset;
+		int extra_data_length;
+		int loop = 1;
 
-		/*--------------------------------------------------------------------
-		 * 
-		 * The current packet could be one of several things:
-		 *
-		 * 1) An IPMI 1.5 packet (the response to our GET CHANNEL
-		 *    AUTHENTICATION CAPABILITIES request)
-		 * 2) An RMCP+ message with an IPMI reponse payload
-		 * 3) AN RMCP+ open session response
-		 * 4) An RAKP-2 message (response to an RAKP 1 message)
-		 * 5) An RAKP-4 message (response to an RAKP 3 message)
-		 * 6) A Serial Over LAN packet
-		 * 7) An Invalid packet (one that doesn't match a request)
-		 * -------------------------------------------------------------------
-		 */
-
-		read_session_data(rsp, &offset, intf->session);
-
-		if (lanplus_has_valid_auth_code(rsp, intf->session) == 0)
-		{
-			lprintf(LOG_ERR, "ERROR: Received message with invalid authcode!");
-			rsp = ipmi_lan_recv_packet(intf);
-			assert(0);
-			//continue;
-		}
-
-		if ((session->v2_data.session_state == LANPLUS_STATE_ACTIVE)    &&
-			 (rsp->session.authtype == IPMI_SESSION_AUTHTYPE_RMCP_PLUS) &&
-			 (rsp->session.bEncrypted))
-
-		{
-			lanplus_decrypt_payload(session->v2_data.crypt_alg,
-						session->v2_data.k2,
-						rsp->data + offset,
-						rsp->session.msglen,
-						rsp->data + offset,
-						&payload_size);
-		}
-		else
-			payload_size = rsp->session.msglen;
-
-
-		/*
-		 * Handle IPMI responses (case #1 and #2) -- all IPMI reponses
-		 */
-		if (rsp->session.payloadtype == IPMI_PAYLOAD_TYPE_IPMI)
-		{
-			struct ipmi_rq_entry * entry;
-			int payload_start = offset;
-			int extra_data_length;
+		while (loop--) {
+			/* fill-in response data */
 			read_ipmi_response(rsp, &offset);
 
 			lprintf(LOG_DEBUG+1, "<< IPMI Response Session Header");
@@ -731,51 +764,54 @@ ipmi_lan_poll_recv(struct ipmi_intf * intf)
 			entry = ipmi_req_lookup_entry(rsp->payload.ipmi_response.rq_seq,
 								rsp->payload.ipmi_response.cmd);
 
-			if (entry != NULL) {
-				lprintf(LOG_DEBUG+2, "IPMI Request Match found");
-				if ( intf->target_addr != intf->my_addr &&
-				     bridgePossible &&
-				     rsp->data_len &&
-				     rsp->payload.ipmi_response.cmd == 0x34 &&
-				     (rsp->payload.ipmi_response.netfn == 0x06 ||
-				     rsp->payload.ipmi_response.netfn == 0x07) &&
-				     rsp->payload.ipmi_response.rs_lun == 0 )
-				{
-					/* Check completion code */
-					if (rsp->data[offset-1] == 0)
-					{
-						lprintf(LOG_DEBUG, "Bridged command answer,"
-						     " waiting for next answer... ");
-						ipmi_req_remove_entry(
-							rsp->payload.ipmi_response.rq_seq,
-							rsp->payload.ipmi_response.cmd);
-						return ipmi_lan_poll_recv(intf);
-					}
-					else
-					{
-						lprintf(LOG_DEBUG, "WARNING: Bridged "
-								   "cmd ccode = 0x%02x",
-								   rsp->data[offset-1]);
+			if (entry == NULL) {
+				lprintf(LOG_INFO, "IPMI Request Match NOT FOUND");
+				/* read one more packet */
+				return (struct ipmi_rs *)1;
+			};
+
+			uint8_t target_cmd = entry->req.msg.target_cmd;
+
+			lprintf(LOG_DEBUG+2, "IPMI Request Match found");
+
+			if (entry->bridging_level) {
+				/* Check completion code */
+				if (rsp->ccode) {
+					lprintf(LOG_DEBUG, "WARNING: Bridged "
+							"cmd ccode = 0x%02x", rsp->ccode);
+				} else {
+					/* decrement bridging level */
+					entry->bridging_level--;
+					if (!entry->bridging_level) {
+						entry->req.msg.cmd = entry->req.msg.target_cmd;
 					}
 
-					if (rsp->data_len &&
-					    rsp->payload.ipmi_response.cmd == 0x34) {
-						memcpy(rsp->data, &rsp->data[offset],
-							(rsp->data_len-offset));
-						if (verbose > 2)
-							printbuf( &rsp->data[offset],
-							(rsp->data_len-offset),
-							"bridge command response");
+					/* check if bridged response is embedded */
+					if (payload_size > 8) {
+						printbuf(&rsp->data[offset], (rsp->data_len-offset-1),
+								"bridge command response");
+						/*
+						 * decrement payload size
+						 * (cks2 for outer Send Message)
+						 */
+						payload_size--;
+
+						/*
+						 * need to make a loop for embedded bridged response
+						 */
+						loop++;
+					} else {
+						lprintf(LOG_DEBUG, "Bridged command answer,"
+								" waiting for next answer... ");
+						/* read one more packet */
+						return (struct ipmi_rs *)1;
 					}
 				}
-
-				ipmi_req_remove_entry(rsp->payload.ipmi_response.rq_seq,
-								rsp->payload.ipmi_response.cmd);
-			} else {
-				lprintf(LOG_INFO, "IPMI Request Match NOT FOUND");
-				rsp = ipmi_lan_recv_packet(intf);
-				continue;
 			}
+
+			/* Remove request entry */
+			ipmi_req_remove_entry(rsp->payload.ipmi_response.rq_seq,
+					rsp->payload.ipmi_response.cmd);
 
 			/*
 			 * Good packet.  Shift response data to start of array.
@@ -783,106 +819,74 @@ ipmi_lan_poll_recv(struct ipmi_intf * intf)
 			 * rsp->data_len becomes the length of that data
 			 */
 			extra_data_length = payload_size - (offset - payload_start) - 1;
-			if (rsp != NULL && extra_data_length)
-			{
+			if (extra_data_length) {
 				rsp->data_len = extra_data_length;
 				memmove(rsp->data, rsp->data + offset, extra_data_length);
-			}
-			else
+			} else {
 				rsp->data_len = 0;
-
-			break;
+			}
 		}
-
-
-		/*
-		 * Open Response
-		 */
-		else if (rsp->session.payloadtype ==
-			 IPMI_PAYLOAD_TYPE_RMCP_OPEN_RESPONSE)
-		{
-			if (session->v2_data.session_state !=
-				 LANPLUS_STATE_OPEN_SESSION_SENT)
-			{
-				lprintf(LOG_ERR, "Error: Received an Unexpected Open Session "
+	/*
+	 * Open Response
+	 */
+	} else if (rsp->session.payloadtype ==
+			IPMI_PAYLOAD_TYPE_RMCP_OPEN_RESPONSE) {
+		if (session->v2_data.session_state !=
+				LANPLUS_STATE_OPEN_SESSION_SENT) {
+			lprintf(LOG_ERR, "Error: Received an Unexpected Open Session "
 					"Response");
-				rsp = ipmi_lan_recv_packet(intf);
-				continue;
-			}
-
-			read_open_session_response(rsp, offset);
-			break;
+			/* read one more packet */
+			return (struct ipmi_rs *)1;
 		}
-
-
-		/*
-		 * RAKP 2
-		 */
-		else if (rsp->session.payloadtype == IPMI_PAYLOAD_TYPE_RAKP_2)
-		{
-			if (session->v2_data.session_state != LANPLUS_STATE_RAKP_1_SENT)
-			{
-				lprintf(LOG_ERR, "Error: Received an Unexpected RAKP 2 message");
-				rsp = ipmi_lan_recv_packet(intf);
-				continue;
-			}
-
-			read_rakp2_message(rsp, offset, session->v2_data.auth_alg);
-			break;
+		read_open_session_response(rsp, offset);
+	/*
+	 * RAKP 2
+	 */
+	} else if (rsp->session.payloadtype == IPMI_PAYLOAD_TYPE_RAKP_2) {
+		if (session->v2_data.session_state != LANPLUS_STATE_RAKP_1_SENT) {
+			lprintf(LOG_ERR, "Error: Received an Unexpected RAKP 2 message");
+			/* read one more packet */
+			return (struct ipmi_rs *)1;
 		}
-
-
-		/*
-		 * RAKP 4
-		 */
-		else if (rsp->session.payloadtype == IPMI_PAYLOAD_TYPE_RAKP_4)
-		{
-			if (session->v2_data.session_state != LANPLUS_STATE_RAKP_3_SENT)
-			{
-				lprintf(LOG_ERR, "Error: Received an Unexpected RAKP 4 message");
-				rsp = ipmi_lan_recv_packet(intf);
-				continue;
-			}
-
-			read_rakp4_message(rsp, offset, session->v2_data.auth_alg);
-			break;
+		read_rakp2_message(rsp, offset, session->v2_data.auth_alg);
+	/*
+	 * RAKP 4
+	 */
+	} else if (rsp->session.payloadtype == IPMI_PAYLOAD_TYPE_RAKP_4) {
+		if (session->v2_data.session_state != LANPLUS_STATE_RAKP_3_SENT) {
+			lprintf(LOG_ERR, "Error: Received an Unexpected RAKP 4 message");
+			/* read one more packet */
+			return (struct ipmi_rs *)1;
 		}
+		read_rakp4_message(rsp, offset, session->v2_data.auth_alg);
+	/*
+	 * SOL
+	 */
+	} else if (rsp->session.payloadtype == IPMI_PAYLOAD_TYPE_SOL) {
+		int payload_start = offset;
+		int extra_data_length;
 
-
-		/*
-		 * SOL
-		 */
-		else if (rsp->session.payloadtype == IPMI_PAYLOAD_TYPE_SOL)
-		{
-			int payload_start = offset;
-			int extra_data_length;
-
-			if (session->v2_data.session_state != LANPLUS_STATE_ACTIVE)
-			{
-				lprintf(LOG_ERR, "Error: Received an Unexpected SOL packet");
-				rsp = ipmi_lan_recv_packet(intf);
-				continue;
-			}
-
-			read_sol_packet(rsp, &offset);
-			extra_data_length = payload_size - (offset - payload_start);
-			if (rsp && extra_data_length)
-			{
-				rsp->data_len = extra_data_length;
-				memmove(rsp->data, rsp->data + offset, extra_data_length);
-			}
-			else
-				rsp->data_len = 0;
-
-			break;
+		if (session->v2_data.session_state != LANPLUS_STATE_ACTIVE) {
+			lprintf(LOG_ERR, "Error: Received an Unexpected SOL packet");
+			/* read one more packet */
+			return (struct ipmi_rs *)1;
 		}
-
-		else
-		{
-			lprintf(LOG_ERR, "Invalid RMCP+ payload type : 0x%x",
+		read_sol_packet(rsp, &offset);
+		extra_data_length = payload_size - (offset - payload_start);
+		if (rsp && extra_data_length) {
+			rsp->data_len = extra_data_length;
+			memmove(rsp->data, rsp->data + offset, extra_data_length);
+		} else {
+			rsp->data_len = 0;
+		}
+	/*
+	 * Unknown Payload type
+	 */
+	} else {
+		lprintf(LOG_ERR, "Invalid RMCP+ payload type : 0x%x",
 				rsp->session.payloadtype);
-			assert(0);
-		}
+		/* read one more packet */
+		return (struct ipmi_rs *)1;
 	}
 
 	return rsp;
@@ -890,8 +894,32 @@ ipmi_lan_poll_recv(struct ipmi_intf * intf)
 
 
 
+/**
+ *
+ * ipmi_lan_poll_recv
+ *
+ * Receive whatever comes back.  Ignore received packets that don't correspond
+ * to a request we've sent.
+ *
+ * Returns: the ipmi_rs packet describing the/a response we expect.
+ */
+static struct ipmi_rs *
+ipmi_lan_poll_recv(struct ipmi_intf * intf)
+{
+	struct ipmi_rs * rsp;
+
+	do {
+		/* poll single packet */
+		rsp = ipmi_lan_poll_single(intf);
+	} while (rsp == (struct ipmi_rs *) 1);
+
+	return rsp;
+}
+
+
+
 /*
- * read_open_session_reponse
+ * read_open_session_response
  *
  * Initialize the ipmi_rs from the IPMI 2.x open session response data.
  *
@@ -913,7 +941,7 @@ read_open_session_response(struct ipmi_rs * rsp, int offset)
 	 /*  Message tag */
 	 rsp->payload.open_session_response.message_tag = rsp->data[offset];
 
-	 /* RAKP reponse code */
+	 /* RAKP response code */
 	 rsp->payload.open_session_response.rakp_return_code = rsp->data[offset + 1];
 
 	 /* Maximum privilege level */
@@ -980,7 +1008,7 @@ read_rakp2_message(
 	 /*  Message tag */
 	 rsp->payload.rakp2_message.message_tag = rsp->data[offset];
 
-	 /* RAKP reponse code */
+	 /* RAKP response code */
 	 rsp->payload.rakp2_message.rakp_return_code = rsp->data[offset + 1];
 
 	 /* Console session ID */
@@ -1016,15 +1044,34 @@ read_rakp2_message(
 		 break;
 
 	 case IPMI_AUTH_RAKP_HMAC_SHA1:
-		 /* We need to copy 20 bytes */
-		 for (i = 0; i < 20; ++i)
-			 rsp->payload.rakp2_message.key_exchange_auth_code[i] =
-				 rsp->data[offset + 40 + i];
-		 break;
+		/* We need to copy 20 bytes */
+		for (i = 0; i < IPMI_SHA_DIGEST_LENGTH; ++i) {
+			rsp->payload.rakp2_message.key_exchange_auth_code[i] =
+				rsp->data[offset + 40 + i];
+		}
+		break;
 
 	 case IPMI_AUTH_RAKP_HMAC_MD5:
-		lprintf(LOG_ERR, "read_rakp2_message: no support for "
-				"IPMI_AUTH_RAKP_HMAC_MD5");
+		/* We need to copy 16 bytes */
+		for (i = 0; i < IPMI_MD5_DIGEST_LENGTH; ++i) {
+			rsp->payload.rakp2_message.key_exchange_auth_code[i] =
+				rsp->data[offset + 40 + i];
+		}
+		break;
+
+#ifdef HAVE_CRYPTO_SHA256
+	 case IPMI_AUTH_RAKP_HMAC_SHA256:
+		/* We need to copy 32 bytes */
+		for (i = 0; i < IPMI_SHA256_DIGEST_LENGTH; ++i) {
+			rsp->payload.rakp2_message.key_exchange_auth_code[i] =
+				rsp->data[offset + 40 + i];
+		}
+		break;
+#endif /* HAVE_CRYPTO_SHA256 */
+
+	 default:
+		lprintf(LOG_ERR, "read_rakp2_message: no support "
+			"for authentication algorithm 0x%x", auth_alg);
 		 assert(0);
 		 break;
 	 }
@@ -1061,7 +1108,7 @@ read_rakp4_message(
 	 /*  Message tag */
 	 rsp->payload.rakp4_message.message_tag = rsp->data[offset];
 
-	 /* RAKP reponse code */
+	 /* RAKP response code */
 	 rsp->payload.rakp4_message.rakp_return_code = rsp->data[offset + 1];
 
 	 /* Console session ID */
@@ -1082,13 +1129,32 @@ read_rakp4_message(
 		 break;
 
 	 case IPMI_AUTH_RAKP_HMAC_SHA1:
-		 /* We need to copy 12 bytes */
-		 for (i = 0; i < 12; ++i)
-			 rsp->payload.rakp4_message.integrity_check_value[i] =
-				 rsp->data[offset + 8 + i];
-		 break;
+		/* We need to copy 12 bytes */
+		for (i = 0; i < IPMI_SHA1_AUTHCODE_SIZE; ++i) {
+			rsp->payload.rakp4_message.integrity_check_value[i] =
+				rsp->data[offset + 8 + i];
+		}
+		break;
 
 	 case IPMI_AUTH_RAKP_HMAC_MD5:
+		/* We need to copy 16 bytes */
+		for (i = 0; i < IPMI_HMAC_MD5_AUTHCODE_SIZE; ++i) {
+			rsp->payload.rakp4_message.integrity_check_value[i] =
+				rsp->data[offset + 8 + i];
+		}
+		break;
+
+#ifdef HAVE_CRYPTO_SHA256
+	 case IPMI_AUTH_RAKP_HMAC_SHA256:
+		/* We need to copy 16 bytes */
+		for (i = 0; i < IPMI_HMAC_SHA256_AUTHCODE_SIZE; ++i) {
+			rsp->payload.rakp4_message.integrity_check_value[i] =
+				rsp->data[offset + 8 + i];
+		}
+		break;
+#endif /* HAVE_CRYPTO_SHA256 */
+
+	 default:
 		 lprintf(LOG_ERR, "read_rakp4_message: no support "
 			 "for authentication algorithm 0x%x", auth_alg);
 		 assert(0);
@@ -1170,19 +1236,6 @@ read_session_data_v2x(
 	#if WORDS_BIGENDIAN
 	rsp->session.id = BSWAP_32(rsp->session.id);
 	#endif
-
-
-	/*
-	 * Verify that the session ID is what we think it should be
-	 */
-	if ((s->v2_data.session_state == LANPLUS_STATE_ACTIVE) &&
-		(rsp->session.id != s->v2_data.console_id))
-	{
-		lprintf(LOG_ERR, "packet session id 0x%x does not "
-			"match active session 0x%0x",
-			rsp->session.id, s->v2_data.console_id);
-		assert(0);
-	}
 
 
 	/* Ignored, so far */
@@ -1406,13 +1459,9 @@ void getIpmiPayloadWireRep(
 			tmp = len - cs;
 			msg[len++] = ipmi_csum(msg+cs, tmp);
 			cs3 = len;
-			msg[len++] = intf->my_addr;
+			msg[len++] = IPMI_REMOTE_SWID;
 			msg[len++] = curr_seq << 2;
 			msg[len++] = 0x34;			/* Send Message rqst */
-	#if 0  /* From lan.c example */
-			entry->req.msg.target_cmd = entry->req.msg.cmd;	/* Save target command */
-			entry->req.msg.cmd = 0x34;		/* (fixup request entry) */
-	#endif
 			msg[len++] = (0x40|intf->target_channel); /* Track request*/
 
 			payload->payload_length += 7;
@@ -1429,7 +1478,10 @@ void getIpmiPayloadWireRep(
 		bridgePossible);
 
 	/* rsAddr */
-	msg[len++] = intf->target_addr; /* IPMI_BMC_SLAVE_ADDR; */
+	if (bridgedRequest)
+		msg[len++] = intf->target_addr;
+	else
+		msg[len++] = IPMI_BMC_SLAVE_ADDR;
 
 	/* net Fn */
 	msg[len++] = req->msg.netfn << 2 | (req->msg.lun & 3);
@@ -1440,7 +1492,7 @@ void getIpmiPayloadWireRep(
 	cs = len;
 
 	/* rqAddr */
-	if (!bridgedRequest)
+	if (bridgedRequest < 2)
 		msg[len++] = IPMI_REMOTE_SWID;
 	else  /* Bridged message */
 		msg[len++] = intf->my_addr;
@@ -1690,7 +1742,7 @@ ipmi_lanplus_build_v2x_msg(
 							  curr_seq);
 		break;
 
-	case IPMI_PAYLOAD_TYPE_SOL: 
+	case IPMI_PAYLOAD_TYPE_SOL:
 		getSolPayloadWireRep(intf,
 							 msg + IPMI_LANPLUS_OFFSET_PAYLOAD,
 							 payload);
@@ -1768,7 +1820,11 @@ ipmi_lanplus_build_v2x_msg(
 	if ((session->v2_data.session_state == LANPLUS_STATE_ACTIVE) &&
 		(session->v2_data.integrity_alg != IPMI_INTEGRITY_NONE))
 	{
-		uint32_t i, hmac_length, integrity_pad_size = 0, hmac_input_size;
+		uint32_t i;
+		uint32_t hmac_length;
+		uint32_t auth_length = 0;
+		uint32_t integrity_pad_size = 0;
+		uint32_t hmac_input_size;
 		uint8_t * hmac_output;
 		uint32_t start_of_session_trailer =
 			IPMI_LANPLUS_OFFSET_PAYLOAD +
@@ -1826,22 +1882,43 @@ ipmi_lanplus_build_v2x_msg(
 		/* Auth Code */
 		lanplus_HMAC(session->v2_data.integrity_alg,
 					 session->v2_data.k1,                /* key        */
-					 20,                                 /* key length */
+					 session->v2_data.k1_len,            /* key length */
 					 msg + IPMI_LANPLUS_OFFSET_AUTHTYPE, /* hmac input */
 					 hmac_input_size,
 					 hmac_output,
 					 &hmac_length);
 
-		assert(hmac_length == 20);
+		switch(session->v2_data.integrity_alg) {
+			case IPMI_INTEGRITY_HMAC_SHA1_96:
+				assert(hmac_length == IPMI_SHA_DIGEST_LENGTH);
+				auth_length = IPMI_SHA1_AUTHCODE_SIZE;
+				break;
+			case IPMI_INTEGRITY_HMAC_MD5_128 :
+				assert(hmac_length == IPMI_MD5_DIGEST_LENGTH);
+				auth_length = IPMI_HMAC_MD5_AUTHCODE_SIZE;
+				break;
+#ifdef HAVE_CRYPTO_SHA256
+			case IPMI_INTEGRITY_HMAC_SHA256_128:
+				assert(hmac_length == IPMI_SHA256_DIGEST_LENGTH);
+				auth_length = IPMI_HMAC_SHA256_AUTHCODE_SIZE;
+				break;
+#endif /* HAVE_CRYPTO_SHA256 */
+			default:
+				assert(0);
+				break;
+		}
 
 		if (verbose > 2)
-			printbuf(hmac_output, 12, "authcode output");
+			printbuf(hmac_output, auth_length, "authcode output");
 
 		/* Set session_trailer_length appropriately */
 		session_trailer_length =
 			integrity_pad_size +
 			2                  + /* pad length + next header */
-			12;                  /* Size of the authcode (we only use the first 12 bytes) */
+			auth_length;         /* Size of the authcode. We only
+			                      * use the first 12(SHA1) or
+			                      * 16(MD5/SHA256) bytes.
+			                      */
 	}
 
 
@@ -1890,26 +1967,26 @@ ipmi_lanplus_build_v2x_ipmi_cmd(
 
 
 	/* IPMI Message Header -- Figure 13-4 of the IPMI v2.0 spec */
-	if ((intf->target_addr == intf->my_addr) || (!bridgePossible))
-   {
-	entry = ipmi_req_add_entry(intf, req, curr_seq);
-   }
-   else /* it's a bridge command */
-   {
-      unsigned char backup_cmd;
+	if ((intf->target_addr == intf->my_addr) || (!bridgePossible)) {
+		entry = ipmi_req_add_entry(intf, req, curr_seq);
+	/* it's a bridge command */
+	} else {
+		unsigned char backup_cmd;
 
-      /* Add entry for cmd */
-   	entry = ipmi_req_add_entry(intf, req, curr_seq);
+		/* Add entry for cmd */
+		entry = ipmi_req_add_entry(intf, req, curr_seq);
 
-      if(entry)
-      {
-         /* Add entry for bridge cmd */
-         backup_cmd = req->msg.cmd;
-         req->msg.cmd = 0x34;
-   	   entry = ipmi_req_add_entry(intf, req, curr_seq);
-         req->msg.cmd = backup_cmd;
-      }
-   }   
+		if (entry) {
+			entry->req.msg.target_cmd = entry->req.msg.cmd;
+			entry->req.msg.cmd = 0x34;
+
+			if (intf->transit_addr &&
+					intf->transit_addr != intf->my_addr)
+				entry->bridging_level = 2;
+			else
+				entry->bridging_level = 1;
+		}
+	}
 
 	if (entry == NULL)
 		return NULL;
@@ -2108,7 +2185,7 @@ ipmi_lanplus_send_payload(
 						  struct ipmi_v2_payload * payload)
 {
 	struct ipmi_rs      * rsp = NULL;
-	uint8_t             * msg_data;
+	uint8_t             * msg_data = NULL;
 	int                   msg_length;
 	struct ipmi_session * session = intf->session;
 	struct ipmi_rq_entry * entry = NULL;
@@ -2125,7 +2202,7 @@ ipmi_lanplus_send_payload(
 	 * so it will only be valid after the open completes.
 	 */
 	saved_timeout = session->timeout;
-	while (try < session->retry) {
+	while (try < intf->ssn_params.retry) {
 		//ltime = time(NULL);
 
 		if (xmit) {
@@ -2263,16 +2340,16 @@ ipmi_lanplus_send_payload(
 		case IPMI_PAYLOAD_TYPE_RMCP_OPEN_REQUEST:
 			session->v2_data.session_state = LANPLUS_STATE_OPEN_SESSION_SENT;
 			/* not retryable for timeouts, force no retry */
-			try = session->retry;
+			try = intf->ssn_params.retry;
 			break;
 		case IPMI_PAYLOAD_TYPE_RAKP_1:
 			session->v2_data.session_state = LANPLUS_STATE_RAKP_1_SENT;
 			/* not retryable for timeouts, force no retry */
-			try = session->retry;
+			try = intf->ssn_params.retry;
 			break;
 		case IPMI_PAYLOAD_TYPE_RAKP_3:
 			/* not retryable for timeouts, force no retry */
-			try = session->retry;
+			try = intf->ssn_params.retry;
 			session->v2_data.session_state = LANPLUS_STATE_RAKP_3_SENT;
 			break;
 		}
@@ -2292,6 +2369,10 @@ ipmi_lanplus_send_payload(
 
 			rsp = ipmi_lanplus_recv_sol(intf); /* Grab the next packet */
 
+			if (!is_sol_packet(rsp)) {
+				break;
+			}
+
 			if (sol_response_acks_packet(rsp, payload))
 				break;
 
@@ -2304,6 +2385,7 @@ ipmi_lanplus_send_payload(
 				intf->session->sol_data.sol_input_handler(rsp);
 				/* In order to avoid duplicate output, just set data_len to 0 */
 				rsp->data_len = 0;
+				break;
 			}
 		}
 
@@ -2348,6 +2430,7 @@ ipmi_lanplus_send_payload(
 	case IPMI_PAYLOAD_TYPE_RMCP_OPEN_REQUEST:
 	case IPMI_PAYLOAD_TYPE_RAKP_1:
 	case IPMI_PAYLOAD_TYPE_RAKP_3:
+	case IPMI_PAYLOAD_TYPE_SOL:
 		free(msg_data);
 		msg_data = NULL;
 		break;
@@ -2574,7 +2657,7 @@ ack_sol_packet(
 	{
 		struct ipmi_v2_payload ack;
 
-		bzero(&ack, sizeof(struct ipmi_v2_payload));
+		memset(&ack, 0, sizeof(struct ipmi_v2_payload));
 
 		ack.payload_type   = IPMI_PAYLOAD_TYPE_SOL;
 
@@ -2677,7 +2760,7 @@ ipmi_get_auth_capabilities_cmd(
 	bridgePossible = 0;
 
 	msg_data[0] = IPMI_LAN_CHANNEL_E | 0x80; // Ask for IPMI v2 data as well
-	msg_data[1] = intf->session->privlvl;
+	msg_data[1] = intf->ssn_params.privlvl;
 
 	memset(&req, 0, sizeof(req));
 	req.msg.netfn    = IPMI_NETFN_APP;            // 0x06
@@ -2728,7 +2811,8 @@ ipmi_close_session_cmd(struct ipmi_intf * intf)
 	uint32_t bmc_session_lsbf;
 	uint8_t backupBridgePossible;
 
-	if (intf->session->v2_data.session_state != LANPLUS_STATE_ACTIVE)
+	if (intf->session == NULL
+			|| intf->session->v2_data.session_state != LANPLUS_STATE_ACTIVE)
 		return -1;
 
 	backupBridgePossible = bridgePossible;
@@ -2809,8 +2893,8 @@ ipmi_lanplus_open_session(struct ipmi_intf * intf)
 	memset(msg, 0, IPMI_OPEN_SESSION_REQUEST_SIZE);
 
 	msg[0] = 0; /* Message tag */
-	if (ipmi_oem_active(intf, "intelplus") || session->privlvl != IPMI_SESSION_PRIV_ADMIN)
-		msg[1] = session->privlvl;
+	if (ipmi_oem_active(intf, "intelplus") || intf->ssn_params.privlvl != IPMI_SESSION_PRIV_ADMIN)
+		msg[1] = intf->ssn_params.privlvl;
 	else
 		msg[1] = 0; /* Give us highest privlg level based on supported algorithms */
 	msg[2] = 0; /* reserved */
@@ -2824,13 +2908,13 @@ ipmi_lanplus_open_session(struct ipmi_intf * intf)
 	msg[7] = (session->v2_data.console_id >> 24) & 0xff;
 
 
-	if (lanplus_get_requested_ciphers(session->cipher_suite_id,
+	if (lanplus_get_requested_ciphers(intf->ssn_params.cipher_suite_id,
 									  &(session->v2_data.requested_auth_alg),
 									  &(session->v2_data.requested_integrity_alg),
 									  &(session->v2_data.requested_crypt_alg)))
 	{
 		lprintf(LOG_WARNING, "Unsupported cipher suite ID : %d\n",
-				session->cipher_suite_id);
+				intf->ssn_params.cipher_suite_id);
 		free(msg);
 		msg = NULL;
 		return 1;
@@ -3030,14 +3114,14 @@ ipmi_lanplus_rakp1(struct ipmi_intf * intf)
 	/*
 	 * Requested maximum privilege level.
 	 */
-	msg[24] = session->privlvl | session->v2_data.lookupbit;
+	msg[24] = intf->ssn_params.privlvl | intf->ssn_params.lookupbit;
 	session->v2_data.requested_role = msg[24];
 	msg[25] = 0; /* reserved */
 	msg[26] = 0; /* reserved */
 
 
 	/* Username specification */
-	msg[27] = strlen((const char *)session->username);
+	msg[27] = strlen((const char *)intf->ssn_params.username);
 	if (msg[27] > IPMI_MAX_USER_NAME_LENGTH)
 	{
 		lprintf(LOG_ERR, "ERROR: user name too long.  "
@@ -3047,11 +3131,20 @@ ipmi_lanplus_rakp1(struct ipmi_intf * intf)
 		msg = NULL;
 		return 1;
 	}
-	memcpy(msg + 28, session->username, msg[27]);
+	memcpy(msg + 28, intf->ssn_params.username, msg[27]);
 
-	v2_payload.payload_type                   = IPMI_PAYLOAD_TYPE_RAKP_1;
-	v2_payload.payload_length                 =
-		IPMI_RAKP1_MESSAGE_SIZE - (16 - msg[27]);
+	v2_payload.payload_type = IPMI_PAYLOAD_TYPE_RAKP_1;
+	if (ipmi_oem_active(intf, "i82571spt")) {
+		/*
+		 * The IPMI v2.0 spec hints on that all user name bytes
+		 * must be occupied (29:44).  The Intel 82571 GbE refuses
+		 * to establish a session if this field is shorter.
+		 */
+		v2_payload.payload_length = IPMI_RAKP1_MESSAGE_SIZE;
+	} else {
+		v2_payload.payload_length =
+			IPMI_RAKP1_MESSAGE_SIZE - (16 - msg[27]);
+	}
 	v2_payload.payload.rakp_1_message.message = msg;
 
 	rsp = ipmi_lanplus_send_payload(intf, &v2_payload);
@@ -3284,15 +3377,16 @@ ipmi_lanplus_rakp3(struct ipmi_intf * intf)
 void
 ipmi_lanplus_close(struct ipmi_intf * intf)
 {
-	if (!intf->abort)
+	if (!intf->abort && intf->session)
 		ipmi_close_session_cmd(intf);
 
-	if (intf->fd >= 0)
+	if (intf->fd >= 0) {
 		close(intf->fd);
+		intf->fd = -1;
+	}
 
 	ipmi_req_clear_entries();
 	ipmi_intf_session_cleanup(intf);
-	intf->session = NULL;
 	intf->opened = 0;
 	intf->manufacturer_id = IPMI_OEM_UNKNOWN;
 	intf = NULL;
@@ -3306,7 +3400,7 @@ ipmi_set_session_privlvl_cmd(struct ipmi_intf * intf)
 	struct ipmi_rs * rsp;
 	struct ipmi_rq req;
 	uint8_t backupBridgePossible;
-	uint8_t privlvl = intf->session->privlvl;
+	uint8_t privlvl = intf->ssn_params.privlvl;
 
 	if (privlvl <= IPMI_SESSION_PRIV_USER)
 		return 0;	/* no need to set higher */
@@ -3356,55 +3450,54 @@ ipmi_lanplus_open(struct ipmi_intf * intf)
 	int rc;
 	int retry;
 	struct get_channel_auth_cap_rsp auth_cap;
+	struct ipmi_session_params *params;
 	struct ipmi_session *session;
 
-	if (!intf || !intf->session)
+	if (!intf)
 		return -1;
-	session = intf->session;
 
-	if (!session->port)
-		session->port = IPMI_LANPLUS_PORT;
-	if (!session->privlvl)
-		session->privlvl = IPMI_SESSION_PRIV_ADMIN;
-	if (!session->timeout)
-		session->timeout = IPMI_LAN_TIMEOUT;
-	if (!session->retry)
-		session->retry = IPMI_LAN_RETRY;
+	if (intf->opened)
+		return intf->fd;
 
-	if (session->hostname == NULL || strlen((const char *)session->hostname) == 0) {
+	params = &intf->ssn_params;
+
+	if (!params->port)
+		params->port = IPMI_LANPLUS_PORT;
+	if (!params->privlvl)
+		params->privlvl = IPMI_SESSION_PRIV_ADMIN;
+	if (!params->timeout)
+		params->timeout = IPMI_LAN_TIMEOUT;
+	if (!params->retry)
+		params->retry = IPMI_LAN_RETRY;
+
+	if (params->hostname == NULL || strlen((const char *)params->hostname) == 0) {
 		lprintf(LOG_ERR, "No hostname specified!");
 		return -1;
 	}
 
-	intf->abort = 1;
+	if (ipmi_intf_socket_connect(intf) == -1) {
+		lprintf(LOG_ERR, "Could not open socket!");
+		goto fail;
+	}
 
+	session = (struct ipmi_session *)malloc(sizeof (struct ipmi_session));
+	if (!session) {
+		lprintf(LOG_ERR, "ipmitool: malloc failure");
+		goto fail;
+	}
+
+	intf->session = session;
 
 	/* Setup our lanplus session state */
+	memset(session, 0, sizeof(struct ipmi_session));
+	session->timeout = params->timeout;
+	memcpy(&session->authcode, &params->authcode_set, sizeof(session->authcode));
 	session->v2_data.auth_alg         = IPMI_AUTH_RAKP_NONE;
 	session->v2_data.crypt_alg        = IPMI_CRYPT_NONE;
-	session->v2_data.console_id       = 0x00;
-	session->v2_data.bmc_id           = 0x00;
 	session->sol_data.sequence_number = 1;
-	//session->sol_data.last_received_sequence_number = 0;
-	//session->sol_data.last_received_byte_count      = 0;
-	memset(session->v2_data.sik, 0, IPMI_SIK_BUFFER_SIZE);
-
-	/* Kg is set in ipmi_intf */
-	//memset(session->v2_data.kg,  0, IPMI_KG_BUFFER_SIZE);
-
-	if (ipmi_intf_socket_connect (intf) == -1) {
-		lprintf(LOG_ERR, "Could not open socket!");
-		return -1;
-	}
-
-	if (intf->fd < 0) {
-		lperror(LOG_ERR, "Connect to %s failed",
-			session->hostname);
-		intf->close(intf);
-		return -1;
-	}
 
 	intf->opened = 1;
+	intf->abort = 1;
 
 	/*
 	 *
@@ -3413,12 +3506,11 @@ ipmi_lanplus_open(struct ipmi_intf * intf)
 	if (!ipmi_oem_active(intf, "i82571spt") &&
 			ipmi_get_auth_capabilities_cmd(intf, &auth_cap)) {
 		lprintf(LOG_INFO, "Error issuing Get Channel "
-			"Authentication Capabilies request");
+			"Authentication Capabilities request");
 		goto fail;
 	}
 
-	if (!ipmi_oem_active(intf, "i82571spt") && ! auth_cap.v20_data_available)
-	{
+	if (!ipmi_oem_active(intf, "i82571spt") && ! auth_cap.v20_data_available) {
 		lprintf(LOG_INFO, "This BMC does not support IPMI v2 / RMCP+");
 		goto fail;
 	}
@@ -3434,7 +3526,6 @@ ipmi_lanplus_open(struct ipmi_intf * intf)
 		 * Open session
 		 */
 		if ((rc = ipmi_lanplus_open_session(intf)) == 1) {
-			intf->close(intf);
 			goto fail;
 		}
 		if (rc == 2) {
@@ -3445,7 +3536,6 @@ ipmi_lanplus_open(struct ipmi_intf * intf)
 		 * RAKP 1
 		 */
 		if ((rc = ipmi_lanplus_rakp1(intf)) == 1) {
-			intf->close(intf);
 			goto fail;
 		}
 		if (rc == 2) {
@@ -3456,7 +3546,6 @@ ipmi_lanplus_open(struct ipmi_intf * intf)
 		 * RAKP 3
 		 */
 		if ((rc = ipmi_lanplus_rakp3(intf)) == 1) {
-			intf->close(intf);
 			goto fail;
 		}
 		if (rc == 0) break;
@@ -3465,24 +3554,29 @@ ipmi_lanplus_open(struct ipmi_intf * intf)
 
 	lprintf(LOG_DEBUG, "IPMIv2 / RMCP+ SESSION OPENED SUCCESSFULLY\n");
 
+	intf->abort = 0;
+
 	if (!ipmi_oem_active(intf, "i82571spt")) {
 		rc = ipmi_set_session_privlvl_cmd(intf);
 		if (rc < 0) {
-			intf->close(intf);
 			goto fail;
 		}
+
+		/* automatically detect interface request and response sizes */
+		hpm2_detect_max_payload_size(intf);
 	}
-	intf->manufacturer_id = ipmi_get_oem(intf);
+
 	bridgePossible = 1;
 
-	/* automatically detect interface request and response sizes */
-	hpm2_detect_max_payload_size(intf);
+	if (!ipmi_oem_active(intf, "i82571spt")) {
+		intf->manufacturer_id = ipmi_get_oem(intf);
+	}
 
 	return intf->fd;
 
  fail:
 	lprintf(LOG_ERR, "Error: Unable to establish IPMI v2 / RMCP+ session");
-	intf->opened = 0;
+	intf->close(intf);
 	return -1;
 }
 
@@ -3582,10 +3676,12 @@ static int
 ipmi_lanplus_keepalive(struct ipmi_intf * intf)
 {
 	struct ipmi_rs * rsp;
-	struct ipmi_rq req = { msg: {
-		netfn: IPMI_NETFN_APP,
-		cmd: 1,
-	}};
+	struct ipmi_rq req = {
+		.msg = {
+			.netfn = IPMI_NETFN_APP,
+			.cmd = 1,
+		}
+	};
 
 	if (!intf->opened)
 		return 0;
@@ -3623,13 +3719,6 @@ static int ipmi_lanplus_setup(struct ipmi_intf * intf)
 	if (lanplus_seed_prng(16))
 		return -1;
 
-	intf->session = malloc(sizeof(struct ipmi_session));
-	if (intf->session == NULL) {
-		lprintf(LOG_ERR, "ipmitool: malloc failure");
-		return -1;
-	}
-	memset(intf->session, 0, sizeof(struct ipmi_session));
-
     /* setup default LAN maximum request and response sizes */
     intf->max_request_data_size = IPMI_LAN_MAX_REQUEST_SIZE;
     intf->max_response_data_size = IPMI_LAN_MAX_RESPONSE_SIZE;
@@ -3639,7 +3728,7 @@ static int ipmi_lanplus_setup(struct ipmi_intf * intf)
 
 static void ipmi_lanp_set_max_rq_data_size(struct ipmi_intf * intf, uint16_t size)
 {
-	if (intf->session->cipher_suite_id == 3) {
+	if (intf->ssn_params.cipher_suite_id == 3) {
 		/*
 		 * encrypted payload can only be multiple of 16 bytes
 		 */
@@ -3657,7 +3746,7 @@ static void ipmi_lanp_set_max_rq_data_size(struct ipmi_intf * intf, uint16_t siz
 
 static void ipmi_lanp_set_max_rp_data_size(struct ipmi_intf * intf, uint16_t size)
 {
-	if (intf->session->cipher_suite_id == 3) {
+	if (intf->ssn_params.cipher_suite_id == 3) {
 		/*
 		 * encrypted payload can only be multiple of 16 bytes
 		 */

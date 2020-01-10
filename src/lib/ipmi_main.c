@@ -1,21 +1,21 @@
 /*
  * Copyright (c) 2003 Sun Microsystems, Inc.  All Rights Reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
- * 
+ *
  * Redistribution of source code must retain the above copyright
  * notice, this list of conditions and the following disclaimer.
- * 
+ *
  * Redistribution in binary form must reproduce the above copyright
  * notice, this list of conditions and the following disclaimer in the
  * documentation and/or other materials provided with the distribution.
- * 
+ *
  * Neither the name of Sun Microsystems, Inc. or the names of
  * contributors may be used to endorse or promote products derived
  * from this software without specific prior written permission.
- * 
+ *
  * This software is provided "AS IS," without a warranty of any kind.
  * ALL EXPRESS OR IMPLIED CONDITIONS, REPRESENTATIONS AND WARRANTIES,
  * INCLUDING ANY IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A
@@ -29,6 +29,11 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _XOPEN_SOURCE 700
+#define _BSD_SOURCE || \
+	(_XOPEN_SOURCE >= 500 || \
+	_XOPEN_SOURCE && _XOPEN_SOURCE_EXTENDED) && \
+	!(_POSIX_C_SOURCE >= 200112L || _XOPEN_SOURCE >= 600)
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -68,16 +73,22 @@
 #include <ipmitool/ipmi_oem.h>
 #include <ipmitool/ipmi_ekanalyzer.h>
 #include <ipmitool/ipmi_picmg.h>
+#include <ipmitool/ipmi_kontronoem.h>
+#include <ipmitool/ipmi_vita.h>
 
 #ifdef HAVE_CONFIG_H
 # include <config.h>
 #endif
 
 #ifdef ENABLE_ALL_OPTIONS
-# define OPTION_STRING	"I:hVvcgsEKYao:H:d:P:f:U:p:C:L:A:t:T:m:z:S:l:b:B:e:k:y:O:R:N:D:"
+# define OPTION_STRING	"I:46hVvcgsEKYao:H:d:P:f:U:p:C:L:A:t:T:m:z:S:l:b:B:e:k:y:O:R:N:D:"
 #else
-# define OPTION_STRING	"I:hVvcH:f:U:p:d:S:D:"
+# define OPTION_STRING	"I:46hVvcH:f:U:p:d:S:D:"
 #endif
+
+/* From src/plugins/ipmi_intf.c: */
+void
+ipmi_intf_set_max_request_data_size(struct ipmi_intf * intf, uint16_t size);
 
 extern int verbose;
 extern int csv_output;
@@ -227,6 +238,8 @@ ipmi_option_usage(const char * progname, struct ipmi_cmd * cmdlist, struct ipmi_
 	lprintf(LOG_NOTICE, "       -S sdr         Use local file for remote SDR cache");
 	lprintf(LOG_NOTICE, "       -D tty:b[:s]   Specify the serial device, baud rate to use");
 	lprintf(LOG_NOTICE, "                      and, optionally, specify that interface is the system one");
+	lprintf(LOG_NOTICE, "       -4             Use only IPv4");
+	lprintf(LOG_NOTICE, "       -6             Use only IPv6");
 #ifdef ENABLE_ALL_OPTIONS
 	lprintf(LOG_NOTICE, "       -a             Prompt for remote password");
 	lprintf(LOG_NOTICE, "       -Y             Prompt for the Kg key for IPMIv2 authentication");
@@ -263,79 +276,31 @@ ipmi_option_usage(const char * progname, struct ipmi_cmd * cmdlist, struct ipmi_
  *
  *                       This insures that the IOL session gets freed
  *                       for other callers.
- * 
+ *
  * returns -1
  */
 void ipmi_catch_sigint()
 {
 	if (ipmi_main_intf != NULL) {
 		printf("\nSIGN INT: Close Interface %s\n",ipmi_main_intf->desc);
+		/* reduce retry count to a single retry */
+		ipmi_main_intf->ssn_params.retry = 1;
+		/* close interface */
 		ipmi_main_intf->close(ipmi_main_intf);
 	}
 	exit(-1);
 }
 
-/* ipmi_parse_hex - convert hexadecimal numbers to ascii string
- *                  Input string must be composed of two-characer hexadecimal numbers.
- *                  There is no separator between the numbers. Each number results in one character
- *                  of the converted string.
- *
- *                  Example: ipmi_parse_hex("50415353574F5244") returns 'PASSWORD'
- *
- * @param str:  input string. It must contain only even number of '0'-'9','a'-'f' and 'A-F' characters.
- * @returns converted ascii string
- * @returns NULL on error
- */
-static unsigned char *
-ipmi_parse_hex(const char *str)
+static uint8_t
+ipmi_acquire_ipmb_address(struct ipmi_intf * intf)
 {
-	const char * p;
-	unsigned char * out, *q;
-	unsigned char b = 0;
-	int shift = 4;
-
-	if (strlen(str) == 0)
-		return NULL;
-
-	if (strlen(str) % 2 != 0) {
-		lprintf(LOG_ERR, "Number of hex_kg characters is not even");
-		return NULL;
-	}
-
-	if (strlen(str) > (IPMI_KG_BUFFER_SIZE-1)*2) {
-		lprintf(LOG_ERR, "Kg key is too long");
-		return NULL;
-	}
-
-	out = calloc(IPMI_KG_BUFFER_SIZE, sizeof(unsigned char));
-	if (out == NULL) {
-		lprintf(LOG_ERR, "malloc failure");
-		return NULL;
-	}
-
-	for (p = str, q = out; *p; p++) {
-		if (!isxdigit(*p)) {
-			lprintf(LOG_ERR, "Kg_hex is not hexadecimal number");
-			free(out);
-			out = NULL;
-			return NULL;
-		}
-
-		if (*p < 'A') /* it must be 0-9 */
-			b = *p - '0';
-		else /* it's A-F or a-f */
-			b = (*p | 0x20) - 'a' + 10; /* convert to lowercase and to 10-15 */
-
-		*q = *q + b << shift;
-		if (shift)
-			shift = 0;
-		else {
-			shift = 4;
-			q++;
-		}
-	}
-
-	return out;
+	if (intf->picmg_avail) {
+		return ipmi_picmg_ipmb_address(intf);
+	} else if (intf->vita_avail) {
+		return ipmi_vita_ipmb_address(intf);
+	} else {
+		return 0;
+    }
 }
 
 /* ipmi_parse_options  -  helper function to handle parsing command line options
@@ -378,13 +343,14 @@ ipmi_main(int argc, char ** argv,
 	char * progname = NULL;
 	char * oemtype  = NULL;
 	char * sdrcache = NULL;
-	unsigned char * kgkey = NULL;
+	uint8_t kgkey[IPMI_KG_BUFFER_SIZE];
 	char * seloem   = NULL;
 	int port = 0;
 	int devnum = 0;
 	int cipher_suite_id = 3; /* See table 22-19 of the IPMIv2 spec */
 	int argflag, i, found;
 	int rc = -1;
+	int ai_family = AF_UNSPEC;
 	char sol_escape_char = SOL_ESCAPE_CHARACTER_DEFAULT;
 	char * devfile  = NULL;
 
@@ -392,6 +358,7 @@ ipmi_main(int argc, char ** argv,
 	progname = strrchr(argv[0], '/');
 	progname = ((progname == NULL) ? argv[0] : progname+1);
 	signal(SIGINT, ipmi_catch_sigint);
+	memset(kgkey, 0, sizeof(kgkey));
 
 	while ((argflag = getopt(argc, (char **)argv, OPTION_STRING)) != -1)
 	{
@@ -518,38 +485,30 @@ ipmi_main(int argc, char ** argv,
 			}
 			break;
 		case 'k':
-			if (kgkey) {
-				free(kgkey);
-				kgkey = NULL;
-			}
-			kgkey = strdup(optarg);
-			if (kgkey == NULL) {
-				lprintf(LOG_ERR, "%s: malloc failure", progname);
-				goto out_free;
-			}
+			memset(kgkey, 0, sizeof(kgkey));
+			strncpy((char *)kgkey, optarg, sizeof(kgkey) - 1);
 			break;
 		case 'K':
 			if ((tmp_env = getenv("IPMI_KGKEY"))) {
-				if (kgkey) {
-					free(kgkey);
-					kgkey = NULL;
-				}
-				kgkey = strdup(tmp_env);
-				if (kgkey == NULL) {
-					lprintf(LOG_ERR, "%s: malloc failure", progname);
-					goto out_free;
-				}
+				memset(kgkey, 0, sizeof(kgkey));
+				strncpy((char *)kgkey, tmp_env,
+					sizeof(kgkey) - 1);
 			} else {
 				lprintf(LOG_WARN, "Unable to read kgkey from environment");
 			}
 			break;
 		case 'y':
-			if (kgkey) {
-				free(kgkey);
-				kgkey = NULL;
-			}
-			kgkey = ipmi_parse_hex(optarg);
-			if (kgkey == NULL) {
+			memset(kgkey, 0, sizeof(kgkey));
+
+			rc = ipmi_parse_hex(optarg, kgkey, sizeof(kgkey) - 1);
+			if (rc == -1) {
+				lprintf(LOG_ERR, "Number of Kg key characters is not even");
+				goto out_free;
+			} else if (rc == -3) {
+				lprintf(LOG_ERR, "Kg key is not hexadecimal number");
+				goto out_free;
+			} else if (rc > (IPMI_KG_BUFFER_SIZE-1)) {
+				lprintf(LOG_ERR, "Kg key is too long");
 				goto out_free;
 			}
 			break;
@@ -560,16 +519,10 @@ ipmi_main(int argc, char ** argv,
 			tmp_pass = getpass("Key: ");
 #endif
 			if (tmp_pass != NULL) {
-				if (kgkey) {
-					free(kgkey);
-					kgkey = NULL;
-				}
-				kgkey = strdup(tmp_pass);
+				memset(kgkey, 0, sizeof(kgkey));
+				strncpy((char *)kgkey, tmp_pass,
+					sizeof(kgkey) - 1);
 				tmp_pass = NULL;
-				if (kgkey == NULL) {
-					lprintf(LOG_ERR, "%s: malloc failure", progname);
-					goto out_free;
-				}
 			}
 			break;
 		case 'U':
@@ -607,6 +560,38 @@ ipmi_main(int argc, char ** argv,
 			devfile = strdup(optarg);
 			if (devfile == NULL) {
 				lprintf(LOG_ERR, "%s: malloc failure", progname);
+				goto out_free;
+			}
+			break;
+		case '4':
+			/* IPv4 only */
+			if (ai_family == AF_UNSPEC) {
+				ai_family = AF_INET;
+			} else {
+				if (ai_family == AF_INET6) {
+					lprintf(LOG_ERR,
+						"Parameter is mutually exclusive with -6.");
+				} else {
+					lprintf(LOG_ERR,
+						"Multiple -4 parameters given.");
+				}
+				rc = (-1);
+				goto out_free;
+			}
+			break;
+		case '6':
+			/* IPv6 only */
+			if (ai_family == AF_UNSPEC) {
+				ai_family = AF_INET6;
+			} else {
+				if (ai_family == AF_INET) {
+					lprintf(LOG_ERR,
+						"Parameter is mutually exclusive with -4.");
+				} else {
+					lprintf(LOG_ERR,
+						"Multiple -6 parameters given.");
+				}
+				rc = (-1);
 				goto out_free;
 			}
 			break;
@@ -867,8 +852,7 @@ ipmi_main(int argc, char ** argv,
 		ipmi_intf_session_set_username(ipmi_main_intf, username);
 	if (password != NULL)
 		ipmi_intf_session_set_password(ipmi_main_intf, password);
-	if (kgkey != NULL)
-		ipmi_intf_session_set_kgkey(ipmi_main_intf, kgkey);
+	ipmi_intf_session_set_kgkey(ipmi_main_intf, kgkey);
 	if (port > 0)
 		ipmi_intf_session_set_port(ipmi_main_intf, port);
 	if (authtype >= 0)
@@ -893,6 +877,7 @@ ipmi_main(int argc, char ** argv,
 	/* setup device file if given */
 	ipmi_main_intf->devfile = devfile;
 
+	ipmi_main_intf->ai_family = ai_family;
 	/* Open the interface with the specified or default IPMB address */
 	ipmi_main_intf->my_addr = arg_addr ? arg_addr : IPMI_BMC_SLAVE_ADDR;
 	if (ipmi_main_intf->open != NULL) {
@@ -900,15 +885,26 @@ ipmi_main(int argc, char ** argv,
 			goto out_free;
 		}
 	}
-	/*
-	 * Attempt picmg discovery of the actual interface address unless
-	 * the users specified an address.
-	 *	Address specification always overrides discovery
-	 */
-	if (picmg_discover(ipmi_main_intf) && !arg_addr) {
-		lprintf(LOG_DEBUG, "Running PICMG Get Address Info");
-		addr = ipmi_picmg_ipmb_address(ipmi_main_intf);
-		lprintf(LOG_INFO,  "Discovered IPMB-0 address 0x%x", addr);
+
+	if (!ipmi_oem_active(ipmi_main_intf, "i82571spt")) {
+		/*
+		 * Attempt picmg/vita discovery of the actual interface
+		 * address, unless the users specified an address.
+		 * Address specification always overrides discovery
+		 */
+		if (picmg_discover(ipmi_main_intf)) {
+			ipmi_main_intf->picmg_avail = 1;
+		} else if (vita_discover(ipmi_main_intf)) {
+			ipmi_main_intf->vita_avail = 1;
+		}
+	}
+
+	if (arg_addr) {
+		addr = arg_addr;
+	} else if (!ipmi_oem_active(ipmi_main_intf, "i82571spt")) {
+		lprintf(LOG_DEBUG, "Acquire IPMB address");
+		addr = ipmi_acquire_ipmb_address(ipmi_main_intf);
+		lprintf(LOG_INFO,  "Discovered IPMB address 0x%x", addr);
 	}
 
 	/*
@@ -916,41 +912,44 @@ ipmi_main(int argc, char ** argv,
 	 * used for open, Set the discovered IPMB address as my address if the
 	 * interface supports it.
 	 */
-	if (addr != 0 && addr != ipmi_main_intf->my_addr &&
-						ipmi_main_intf->set_my_addr) {
-		/*
-		 * Only set the interface address on interfaces which support
-		 * it
-		 */
-		(void) ipmi_main_intf->set_my_addr(ipmi_main_intf, addr);
+	if (addr != 0 && addr != ipmi_main_intf->my_addr) {
+		if (ipmi_main_intf->set_my_addr) {
+			/*
+			 * Some interfaces need special handling
+			 * when changing local address
+			 */
+			(void)ipmi_main_intf->set_my_addr(ipmi_main_intf, addr);
+		}
+
+		/* set local address */
+		ipmi_main_intf->my_addr = addr;
 	}
 
+	ipmi_main_intf->target_addr = ipmi_main_intf->my_addr;
+
 	/* If bridging addresses are specified, handle them */
-	if (target_addr > 0) {
-		ipmi_main_intf->target_addr = target_addr;
-		ipmi_main_intf->target_lun = target_lun ;
-		ipmi_main_intf->target_channel = target_channel ;
-	}
-	if (transit_addr > 0) {
+	if (transit_addr > 0 || target_addr > 0) {
 		/* sanity check, transit makes no sense without a target */
 		if ((transit_addr != 0 || transit_channel != 0) &&
-			ipmi_main_intf->target_addr == 0) {
+			target_addr == 0) {
 			lprintf(LOG_ERR,
 				"Transit address/channel %#x/%#x ignored. "
 				"Target address must be specified!",
 				transit_addr, transit_channel);
 			goto out_free;
 		}
+		ipmi_main_intf->target_addr = target_addr;
+		ipmi_main_intf->target_channel = target_channel ;
 
 		ipmi_main_intf->transit_addr    = transit_addr;
 		ipmi_main_intf->transit_channel = transit_channel;
-	}
-	if (ipmi_main_intf->target_addr > 0) {
+
+
 		/* must be admin level to do this over lan */
 		ipmi_intf_session_set_privlvl(ipmi_main_intf, IPMI_SESSION_PRIV_ADMIN);
 		/* Get the ipmb address of the targeted entity */
 		ipmi_main_intf->target_ipmb_addr =
-					ipmi_picmg_ipmb_address(ipmi_main_intf);
+					ipmi_acquire_ipmb_address(ipmi_main_intf);
 		lprintf(LOG_DEBUG, "Specified addressing     Target  %#x:%#x Transit %#x:%#x",
 					   ipmi_main_intf->target_addr,
 					   ipmi_main_intf->target_channel,
@@ -961,6 +960,9 @@ ipmi_main(int argc, char ** argv,
 					   ipmi_main_intf->target_ipmb_addr);
 		}
 	}
+
+	/* set target LUN (for RAW command) */
+	ipmi_main_intf->target_lun = target_lun ;
 
 	lprintf(LOG_DEBUG, "Interface address: my_addr %#x "
 			   "transit %#x:%#x target %#x:%#x "
@@ -1043,10 +1045,6 @@ ipmi_main(int argc, char ** argv,
 	if (seloem != NULL) {
 		free(seloem);
 		seloem = NULL;
-	}
-	if (kgkey != NULL) {
-		free(kgkey);
-		kgkey = NULL;
 	}
 	if (sdrcache != NULL) {
 		free(sdrcache);

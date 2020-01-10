@@ -29,6 +29,11 @@
  * LIABILITY, ARISING OUT OF THE USE OF OR INABILITY TO USE THIS SOFTWARE,
  * EVEN IF SUN HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
+#define _XOPEN_SOURCE
+#define _BSD_SOURCE || \
+	(_XOPEN_SOURCE >= 500 || \
+                       _XOPEN_SOURCE && _XOPEN_SOURCE_EXTENDED) && \
+	!(_POSIX_C_SOURCE >= 200809L || _XOPEN_SOURCE >= 700)
 
 #include <stdlib.h>
 #include <string.h>
@@ -92,7 +97,6 @@ static struct termios _saved_tio;
 static int            _in_raw_mode = 0;
 static int            _disable_keepalive = 0;
 static int            _use_sol_for_keepalive = 0;
-static int            _keepalive_retries = 0;
 
 extern int verbose;
 
@@ -544,8 +548,8 @@ ipmi_get_sol_info(
 		case 0x80:
 			if( intf->session != NULL ) {
 				lprintf(LOG_ERR, "Info: SOL parameter '%s' not supported - defaulting to %d",
-						val2str(data[1], sol_parameter_vals), intf->session->port);
-				params->payload_port = intf->session->port;
+						val2str(data[1], sol_parameter_vals), intf->ssn_params.port);
+				params->payload_port = intf->ssn_params.port;
 			} else {
 				lprintf(LOG_ERR,
 						"Info: SOL parameter '%s' not supported - can't determine which "
@@ -1235,14 +1239,14 @@ printSolEscapeSequences(struct ipmi_intf * intf)
 	%c?  - this message\n\
 	%c%c  - send the escape character by typing it twice\n\
 	(Note that escapes are only recognized immediately after newline.)\n",
-		   intf->session->sol_escape_char,
-		   intf->session->sol_escape_char,
-		   intf->session->sol_escape_char,
-		   intf->session->sol_escape_char,
-		   intf->session->sol_escape_char,
-		   intf->session->sol_escape_char,
-		   intf->session->sol_escape_char,
-		   intf->session->sol_escape_char);
+		   intf->ssn_params.sol_escape_char,
+		   intf->ssn_params.sol_escape_char,
+		   intf->ssn_params.sol_escape_char,
+		   intf->ssn_params.sol_escape_char,
+		   intf->ssn_params.sol_escape_char,
+		   intf->ssn_params.sol_escape_char,
+		   intf->ssn_params.sol_escape_char,
+		   intf->ssn_params.sol_escape_char);
 }
 
 
@@ -1300,7 +1304,7 @@ ipmi_sol_deactivate(struct ipmi_intf * intf, int instance)
 	req.msg.data_len = 6;
 	req.msg.data     = data;
 
-	bzero(data, sizeof(data));
+	memset(data, 0, sizeof(data));
 	data[0] = IPMI_PAYLOAD_TYPE_SOL;  /* payload type      */
 	data[1] = instance;               /* payload instance. */
 
@@ -1379,25 +1383,25 @@ processSolUserInput(
 			switch (ch) {
 			case '.':
 				printf("%c. [terminated ipmitool]\n",
-				       intf->session->sol_escape_char);
+				       intf->ssn_params.sol_escape_char);
 				retval = 1;
 				break;
 
 			case 'Z' - 64:
 				printf("%c^Z [suspend ipmitool]\n",
-				       intf->session->sol_escape_char);
+				       intf->ssn_params.sol_escape_char);
 				suspendSelf(1); /* Restore tty back to raw */
 				continue;
 
 			case 'X' - 64:
 				printf("%c^Z [suspend ipmitool]\n",
-				       intf->session->sol_escape_char);
+				       intf->ssn_params.sol_escape_char);
 				suspendSelf(0); /* Don't restore to raw mode */
 				continue;
 
 			case 'B':
 				printf("%cB [send break]\n",
-				       intf->session->sol_escape_char);
+				       intf->ssn_params.sol_escape_char);
 				sendBreak(intf);
 				continue;
 
@@ -1406,16 +1410,16 @@ processSolUserInput(
 				continue;
 
 			default:
-				if (ch != intf->session->sol_escape_char)
+				if (ch != intf->ssn_params.sol_escape_char)
 					v2_payload.payload.sol_packet.data[length++] =
-						intf->session->sol_escape_char;
+						intf->ssn_params.sol_escape_char;
 				v2_payload.payload.sol_packet.data[length++] = ch;
 			}
 		}
 
 		else
 		{
-			if (last_was_cr && (ch == intf->session->sol_escape_char)) {
+			if (last_was_cr && (ch == intf->ssn_params.sol_escape_char)) {
 				escape_pending = 1;
 				continue;
 			}
@@ -1441,7 +1445,7 @@ processSolUserInput(
 		struct ipmi_rs * rsp = NULL;
 		int try = 0;
 
-		while (try < intf->session->retry) {
+		while (try < intf->ssn_params.retry) {
 
 			v2_payload.payload.sol_packet.character_count = length;
 
@@ -1644,15 +1648,11 @@ ipmi_sol_red_pill(struct ipmi_intf * intf, int instance)
 			else if (FD_ISSET(intf->fd, &read_fds))
 			{
 				struct ipmi_rs * rs =intf->recv_sol(intf);
-				if ( rs)
-				{
+				if (rs) {
 					output(rs);
+				} else {
+					bShouldExit = bBmcClosedSession = 1;
 				}
-				/*
-				 * Should recv_sol come back null, the incoming packet was not ours.
-				 * Just fall through, the keepalive logic will determine if
-				 * the BMC has dropped the session.
-				 */
  			}
 
 
@@ -1827,12 +1827,12 @@ ipmi_sol_activate(struct ipmi_intf * intf, int looptest, int interval,
 
 	/* NOTE: the spec does allow for SOL traffic to be sent on
 	 * a different port.  we do not yet support that feature. */
-	if (intf->session->sol_data.port != intf->session->port)
+	if (intf->session->sol_data.port != intf->ssn_params.port)
 	{
 		/* try byteswapping port in case BMC sent it incorrectly */
 		uint16_t portswap = BSWAP_16(intf->session->sol_data.port);
 
-		if (portswap == intf->session->port) {
+		if (portswap == intf->ssn_params.port) {
 			intf->session->sol_data.port = portswap;
 		}
 		else {
@@ -1842,7 +1842,7 @@ ipmi_sol_activate(struct ipmi_intf * intf, int looptest, int interval,
 	}
 
 	printf("[SOL Session operational.  Use %c? for help]\n",
-	       intf->session->sol_escape_char);
+	       intf->ssn_params.sol_escape_char);
 
 	if(looptest == 1)
 	{
@@ -1938,10 +1938,6 @@ ipmi_sol_main(struct ipmi_intf * intf, int argc, char ** argv)
 		uint8_t channel = 0xe;
 		uint8_t userid = 1;
 		int enable = -1;
-		if (argc == 1 || argc > 4) {
-			print_sol_usage();
-			return -1;
-		}
 		if (argc == 1 || argc > 4) {
 			print_sol_usage();
 			return -1;
