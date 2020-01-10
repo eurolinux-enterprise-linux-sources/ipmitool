@@ -1,7 +1,7 @@
 Name:         ipmitool
 Summary:      Utility for IPMI control
 Version:      1.8.13
-Release:      8%{?dist}
+Release:      9%{?dist}
 License:      BSD
 Group:        System Environment/Base
 URL:          http://ipmitool.sourceforge.net/
@@ -43,6 +43,7 @@ Patch9: ipmitool-1.8.13-set-kg-key1.patch
 # todo
 #Patch10: ipmitool-1.8.11-set-kg-key2.patch
 Patch11: ipmitool-1.8.13-bootparam.patch
+Patch12: 0012-ID-325-DDR4-DIMM-Decoding-Logic.patch
 
 %description
 This package contains a utility for interfacing with devices that support
@@ -102,6 +103,7 @@ for the host OS to use.
 %patch9 -p1 -b .kg1
 #patch10 -p1 -b .kegkey2
 %patch11 -p1 -b .bootparam
+%patch12 -p1
 
 for f in AUTHORS ChangeLog; do
     iconv -f iso-8859-1 -t utf8 < ${f} > ${f}.utf8
@@ -193,6 +195,10 @@ install -Dm 755 contrib/bmc-snmp-proxy         %{buildroot}%{_libexecdir}/bmc-sn
 %{_libexecdir}/bmc-snmp-proxy
 
 %changelog
+* Tue Aug 16 2016 Boris Ranto <branto@redhat.com> - 0:1.8.13-9
+- New release (0:1.8.13-9)
+- ID: 325 DDR4 DIMM Decoding Logic
+
 * Mon Mar 09 2015 Ales Ledvinka <aledvink@redhat.com> - 1.8.13-8
 - Chassis boot parameter settings support.
 
